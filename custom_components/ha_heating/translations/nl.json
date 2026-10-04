@@ -1,0 +1,73 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "HA Heating Configuratie",
+        "description": "Kies wat je wilt instellen.",
+        "menu_options": {
+          "hub": "Centraal Systeem (Prijzen, Buitentemp, Kalender)",
+          "room": "Nieuwe Kamer / Zone Toevoegen"
+        }
+      },
+      "hub": {
+        "title": "Centraal Energie & Planning Systeem",
+        "description": "Configureer globale sensoren voor energie-arbitrage en weekplanning.",
+        "data": {
+          "gas_price_sensor": "Gasprijs sensor (€/m³)",
+          "electric_price_sensor": "Stroomprijs sensor (€/kWh)",
+          "outdoor_temp_sensor": "Buitentemperatuur sensor",
+          "solar_export_sensor": "Zonne-energie overschot sensor (optioneel)",
+          "vacation_calendar": "Vakantie kalender entiteit (optioneel)",
+          "calendar_filter": "Kalender filter trefwoord (bijv. Vakantie)",
+          "cycle_type": "Type 2-wekelijkse cyclus",
+          "cycle_anchor_date": "Ankerdatum (bij 14-daagse cyclus, YYYY-MM-DD)",
+          "cycle_entity": "Sensor of Helper voor weekstatus (optioneel)"
+        }
+      },
+      "room": {
+        "title": "Kamer Toevoegen",
+        "description": "Configureer de kamer, radiatorkranen, sensoren en optionele airco.",
+        "data": {
+          "room_name": "Naam van de kamer",
+          "room_temp_sensor": "Kamertemperatuursensor (optioneel, anders gemiddelde van TRVs)",
+          "trvs": "Thermostaatkranen (TRVs)",
+          "window_sensors": "Raamsensoren (optioneel)",
+          "window_open_delay": "Raam open vertraging (seconden)",
+          "window_close_delay": "Raam sluiten herstelvertraging (seconden)",
+          "master_thermostat": "Gekoppelde Master-Thermostaat (optioneel)",
+          "master_control_mode": "Aansturingsmethode Master",
+          "master_boost_temp": "Master streeftemperatuur bij vraag (°C)",
+          "master_idle_temp": "Master rusttemperatuur (°C)",
+          "ac_entity": "Airco klimaatentiteit (optioneel)",
+          "ac_quiet_start": "Airco stille tijd start (bijv. 22:00)",
+          "ac_quiet_end": "Airco stille tijd eind (bijv. 07:00)",
+          "ac_enable_cooling": "Automatisch koelen toestaan",
+          "schedule_week_a": "HA Schedule helper: Week A (optioneel)",
+          "schedule_week_b": "HA Schedule helper: Week B (optioneel)",
+          "temp_comfort": "Comfort temperatuur (°C)",
+          "temp_eco": "Eco temperatuur (°C)",
+          "temp_sleep": "Slaap/Nacht temperatuur (°C)",
+          "temp_away": "Afwezigheid temperatuur (°C)",
+          "temp_boost": "Boost temperatuur (°C)",
+          "temp_holiday": "Vakantie temperatuur (°C)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Kan geen verbinding maken",
+      "unknown": "Onbekende fout opgetreden"
+    },
+    "abort": {
+      "already_configured": "Dit onderdeel is al geconfigureerd"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Opties Aanpassen",
+        "description": "Pas de instellingen van deze kamer of centraal systeem aan."
+      }
+    }
+  }
+}
+

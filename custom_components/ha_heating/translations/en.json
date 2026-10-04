@@ -1,0 +1,73 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "HA Heating Configuration",
+        "description": "Choose what to configure.",
+        "menu_options": {
+          "hub": "Central System (Prices, Outdoor temp, Calendar)",
+          "room": "Add New Room / Zone"
+        }
+      },
+      "hub": {
+        "title": "Central Energy & Schedule System",
+        "description": "Configure global sensors for energy arbitrage and scheduling.",
+        "data": {
+          "gas_price_sensor": "Gas price sensor (€/m³)",
+          "electric_price_sensor": "Electricity price sensor (€/kWh)",
+          "outdoor_temp_sensor": "Outdoor temperature sensor",
+          "solar_export_sensor": "Solar export power sensor (optional)",
+          "vacation_calendar": "Vacation calendar entity (optional)",
+          "calendar_filter": "Calendar filter keyword (e.g. Vacation)",
+          "cycle_type": "2-week cycle type",
+          "cycle_anchor_date": "Anchor date (for 14-day cycle, YYYY-MM-DD)",
+          "cycle_entity": "Sensor or helper for week cycle (optional)"
+        }
+      },
+      "room": {
+        "title": "Add Room",
+        "description": "Configure the room, TRVs, sensors and optional air conditioning.",
+        "data": {
+          "room_name": "Room name",
+          "room_temp_sensor": "Room temperature sensor (optional, defaults to TRV average)",
+          "trvs": "Thermostatic radiator valves (TRVs)",
+          "window_sensors": "Window sensors (optional)",
+          "window_open_delay": "Window open delay (seconds)",
+          "window_close_delay": "Window close delay (seconds)",
+          "master_thermostat": "Linked Master Thermostat (optional)",
+          "master_control_mode": "Master control mode",
+          "master_boost_temp": "Master target temp when demand active (°C)",
+          "master_idle_temp": "Master idle temp (°C)",
+          "ac_entity": "Airco climate entity (optional)",
+          "ac_quiet_start": "AC quiet hours start (e.g. 22:00)",
+          "ac_quiet_end": "AC quiet hours end (e.g. 07:00)",
+          "ac_enable_cooling": "Enable automatic cooling",
+          "schedule_week_a": "HA Schedule helper: Week A (optional)",
+          "schedule_week_b": "HA Schedule helper: Week B (optional)",
+          "temp_comfort": "Comfort temperature (°C)",
+          "temp_eco": "Eco temperature (°C)",
+          "temp_sleep": "Sleep temperature (°C)",
+          "temp_away": "Away temperature (°C)",
+          "temp_boost": "Boost temperature (°C)",
+          "temp_holiday": "Holiday temperature (°C)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot connect",
+      "unknown": "Unknown error"
+    },
+    "abort": {
+      "already_configured": "This component is already configured"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Options",
+        "description": "Update settings for this room or central system."
+      }
+    }
+  }
+}
+

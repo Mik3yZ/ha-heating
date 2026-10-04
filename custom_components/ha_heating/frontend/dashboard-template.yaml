@@ -1,0 +1,104 @@
+# Voorbeeld Lovelace Dashboard voor HA Heating
+# Kopieer deze configuratie naar een nieuw Dashboard of View in Home Assistant
+
+title: Slimme Verwarming & Koeling
+icon: mdi:home-thermometer
+views:
+  - title: Kamers & Zones
+    path: kamers
+    icon: mdi:radiator
+    type: grid
+    cards:
+      # Systeem Notificatie / Statusbalk
+      - type: horizontal-stack
+        cards:
+          - type: entity
+            entity: sensor.ha_heating_actieve_week
+            name: Actieve Cyclus
+            icon: mdi:calendar-sync
+          - type: entity
+            entity: sensor.ha_heating_arbitrage_advies
+            name: Voordeligste Bron
+            icon: mdi:scale-balance
+          - type: entity
+            entity: sensor.ha_heating_airco_cop
+            name: Airco COP
+            icon: mdi:heat-pump-outline
+
+      # Voorbeeld Kamer 1: Woonkamer (Vloerverwarming / Direct)
+      - type: custom:ha-heating-card
+        entity: climate.woonkamer_heating
+        name: 🛋️ Woonkamer
+
+      # Voorbeeld Kamer 2: Slaapkamer (TRVs + Master Boven + Airco)
+      - type: custom:ha-heating-card
+        entity: climate.slaapkamer_heating
+        name: 🛏️ Slaapkamer
+
+      # Voorbeeld Kamer 3: Werkkamer / Kantoor (TRV + Airco)
+      - type: custom:ha-heating-card
+        entity: climate.kantoor_heating
+        name: 💼 Werkkamer
+
+      # Master Thermostaten Overzicht
+      - type: entities
+        title: Centrale Thermostaten & Ketel
+        show_header_toggle: false
+        entities:
+          - entity: climate.thermostaat_boven
+            name: 🌡️ Master Boven (Moes BHT-002)
+          - entity: climate.thermostaat_beneden
+            name: ♨️ Vloerverwarming Beneden
+
+  - title: Energie & Arbitrage
+    path: energie
+    icon: mdi:lightning-bolt
+    cards:
+      - type: vertical-stack
+        cards:
+          - type: glance
+            title: Actuele Energietarieven
+            entities:
+              - entity: sensor.gasprijs
+                name: Gasprijs (€/m³)
+                icon: mdi:fire
+              - entity: sensor.stroomprijs
+                name: Stroomprijs (€/kWh)
+                icon: mdi:flash
+              - entity: sensor.buitentemperatuur
+                name: Buitentemperatuur
+                icon: mdi:thermometer
+
+          - type: horizontal-stack
+            cards:
+              - type: gauge
+                entity: sensor.ha_heating_thermische_kosten_gas
+                name: Kosten Gas per kWh Warmte
+                min: 0.05
+                max: 0.35
+                needle: true
+                severity:
+                  green: 0.05
+                  yellow: 0.15
+                  red: 0.25
+              - type: gauge
+                entity: sensor.ha_heating_thermische_kosten_airco
+                name: Kosten Airco per kWh Warmte
+                min: 0.02
+                max: 0.35
+                needle: true
+                severity:
+                  green: 0.02
+                  yellow: 0.12
+                  red: 0.22
+
+          - type: markdown
+            title: Arbitrage Toelichting
+            content: >
+              De integratie vergelijkt continu de kosten van 1 kWh thermische warmte:
+
+              - **Gas**: P_gas / 9.0 (rendement HR-ketel verwerkt)
+              - **Airco (Warmtepomp)**: P_stroom / COP(Buitentemperatuur)
+
+              Wanneer er zonne-energie overschot is (teruglevering), is de warmte van de airco effectief gratis en krijgt de airco altijd voorrang.
+
