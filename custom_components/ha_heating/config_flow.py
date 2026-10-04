@@ -9,13 +9,14 @@ import voluptuous as vol
 
 from homeassistant import config_entries
 from homeassistant.core import callback
-from homeassistant.helpers import selector
+from homeassistant.helpers import area_registry as ar, selector
 
 from .const import (
     CONF_AC_ENABLE_COOLING,
     CONF_AC_ENTITY,
     CONF_AC_QUIET_END,
     CONF_AC_QUIET_START,
+    CONF_AREA_ID,
     CONF_CALENDAR_FILTER,
     CONF_CYCLE_ANCHOR_DATE,
     CONF_CYCLE_ENTITY,
@@ -143,16 +144,37 @@ class HAHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            room_name = user_input.get(CONF_ROOM_NAME, "Room")
-            user_input[CONF_ENTRY_TYPE] = ENTRY_TYPE_ROOM
-            return self.async_create_entry(
-                title=f"Room: {room_name}",
-                data=user_input,
-            )
+            area_id = user_input.get(CONF_AREA_ID)
+
+            # Prevent duplicate rooms for the same Home Assistant Area
+            if area_id:
+                for entry in self._async_current_entries():
+                    if (
+                        entry.data.get(CONF_ENTRY_TYPE) == ENTRY_TYPE_ROOM
+                        and entry.data.get(CONF_AREA_ID) == area_id
+                    ):
+                        errors[CONF_AREA_ID] = "area_already_configured"
+                        break
+
+            if not errors:
+                area_reg = ar.async_get(self.hass)
+                area = area_reg.async_get_area(area_id) if area_id else None
+                default_name = area.name if area else "Kamer"
+                room_name = user_input.get(CONF_ROOM_NAME) or default_name
+                user_input[CONF_ROOM_NAME] = room_name
+                user_input[CONF_ENTRY_TYPE] = ENTRY_TYPE_ROOM
+
+                return self.async_create_entry(
+                    title=f"Kamer: {room_name}",
+                    data=user_input,
+                )
 
         schema = vol.Schema(
             {
-                vol.Required(CONF_ROOM_NAME): str,
+                vol.Required(CONF_AREA_ID): selector.AreaSelector(
+                    selector.AreaSelectorConfig()
+                ),
+                vol.Optional(CONF_ROOM_NAME): str,
                 vol.Optional(CONF_ROOM_TEMP_SENSOR): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 ),
@@ -311,7 +333,11 @@ class HAHeatingOptionsFlowHandler(config_entries.OptionsFlow):
         else:
             schema = vol.Schema(
                 {
-                    vol.Required(
+                    vol.Optional(
+                        CONF_AREA_ID,
+                        description={"suggested_value": current_data.get(CONF_AREA_ID)},
+                    ): selector.AreaSelector(selector.AreaSelectorConfig()),
+                    vol.Optional(
                         CONF_ROOM_NAME,
                         default=current_data.get(CONF_ROOM_NAME, "Room"),
                     ): str,

@@ -28,7 +28,8 @@
         "title": "Kamer Toevoegen",
         "description": "Configureer de kamer, radiatorkranen, sensoren en optionele airco.",
         "data": {
-          "room_name": "Naam van de kamer",
+          "area_id": "Kamer (Home Assistant Ruimte)",
+          "room_name": "Aangepaste weergavenaam (optioneel)",
           "room_temp_sensor": "Kamertemperatuursensor (optioneel, anders gemiddelde van TRVs)",
           "trvs": "Thermostaatkranen (TRVs)",
           "window_sensors": "Raamsensoren (optioneel)",
@@ -55,6 +56,7 @@
     },
     "error": {
       "cannot_connect": "Kan geen verbinding maken",
+      "area_already_configured": "Deze Home Assistant kamer is al toegevoegd aan HA Heating.",
       "unknown": "Onbekende fout opgetreden"
     },
     "abort": {

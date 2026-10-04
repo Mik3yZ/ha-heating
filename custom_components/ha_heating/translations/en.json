@@ -28,7 +28,8 @@
         "title": "Add Room",
         "description": "Configure the room, TRVs, sensors and optional air conditioning.",
         "data": {
-          "room_name": "Room name",
+          "area_id": "Room (Home Assistant Area)",
+          "room_name": "Custom display name (optional)",
           "room_temp_sensor": "Room temperature sensor (optional, defaults to TRV average)",
           "trvs": "Thermostatic radiator valves (TRVs)",
           "window_sensors": "Window sensors (optional)",
@@ -55,6 +56,7 @@
     },
     "error": {
       "cannot_connect": "Cannot connect",
+      "area_already_configured": "This Home Assistant area is already configured in HA Heating.",
       "unknown": "Unknown error"
     },
     "abort": {
