@@ -1,0 +1,108 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <!-- Background Gradient -->
+    <radialGradient id="bgGrad" cx="50%" cy="40%" r="65%">
+      <stop offset="0%" stop-color="#1E293B" />
+      <stop offset="100%" stop-color="#0F172A" />
+    </radialGradient>
+
+    <!-- Warm Fire / Heating Gradient -->
+    <linearGradient id="warmGrad" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#FF3D00" />
+      <stop offset="50%" stop-color="#FF9100" />
+      <stop offset="100%" stop-color="#FFD600" />
+    </linearGradient>
+
+    <!-- Cool / AC Cooling Gradient -->
+    <linearGradient id="coolGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00E5FF" />
+      <stop offset="50%" stop-color="#00B0FF" />
+      <stop offset="100%" stop-color="#2979FF" />
+    </linearGradient>
+
+    <!-- Outer Ring Gradient -->
+    <linearGradient id="ringGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FF6D00" stop-opacity="0.8" />
+      <stop offset="50%" stop-color="#38BDF8" stop-opacity="0.2" />
+      <stop offset="100%" stop-color="#00E5FF" stop-opacity="0.8" />
+    </linearGradient>
+
+    <!-- Glow Filter -->
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="12" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+
+    <filter id="softGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="6" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <!-- Background Card -->
+  <rect width="512" height="512" rx="108" fill="url(#bgGrad)" />
+
+  <!-- Outer Thermostat Ring Glow -->
+  <circle cx="256" cy="220" r="145" fill="none" stroke="url(#ringGrad)" stroke-width="8" opacity="0.6" filter="url(#softGlow)" />
+  <circle cx="256" cy="220" r="145" fill="none" stroke="url(#ringGrad)" stroke-width="4" />
+
+  <!-- Inner Dark Dial Face -->
+  <circle cx="256" cy="220" r="130" fill="#0B132B" stroke="#1E293B" stroke-width="2" />
+
+  <!-- Thermostat Tick Marks -->
+  <g stroke="#334155" stroke-width="3" stroke-linecap="round">
+    <line x1="256" y1="98" x2="256" y2="108" stroke="#FF9100" stroke-width="4" />
+    <line x1="170" y1="134" x2="177" y2="141" stroke="#FF5722" />
+    <line x1="134" y1="220" x2="144" y2="220" />
+    <line x1="170" y1="306" x2="177" y2="299" />
+    <line x1="256" y1="342" x2="256" y2="332" />
+    <line x1="342" y1="306" x2="335" y2="299" />
+    <line x1="378" y1="220" x2="368" y2="220" />
+    <line x1="342" y1="134" x2="335" y2="141" stroke="#00E5FF" />
+  </g>
+
+  <!-- Central Symbol: Fusion of Flame (Gas/Heat) and Snowflake/Crystal (AC/Cool) -->
+  <g filter="url(#glow)">
+    <!-- Warm Flame (Left Side) -->
+    <path d="M 256,135 
+             C 256,135 210,185 210,230 
+             C 210,258 226,278 245,286 
+             C 241,272 242,254 250,242 
+             C 256,233 262,226 262,212 
+             C 262,204 258,194 256,186 
+             C 254,196 248,206 242,212 
+             C 236,218 232,226 232,236 
+             C 232,246 238,256 246,260 
+             C 230,252 222,238 222,224 
+             C 222,196 256,155 256,135 Z" 
+          fill="url(#warmGrad)" />
+
+    <!-- Cool Snowflake / Crystal Branch (Right Side) -->
+    <path d="M 256,135 
+             L 256,295" 
+          stroke="url(#coolGrad)" stroke-width="6" stroke-linecap="round" />
+    
+    <!-- Snowflake Crystals on Right -->
+    <path d="M 256,165 L 285,145 M 256,190 L 295,175 M 280,181 L 295,195" 
+          stroke="url(#coolGrad)" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" />
+    
+    <path d="M 256,220 L 305,220 M 285,208 L 298,220 L 285,232" 
+          stroke="url(#coolGrad)" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" />
+          
+    <path d="M 256,250 L 295,265 M 280,259 L 295,245" 
+          stroke="url(#coolGrad)" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" />
+  </g>
+
+  <!-- Home Assistant Icon Subtle Accent Ring/Spark -->
+  <circle cx="256" cy="220" r="10" fill="#FFFFFF" opacity="0.9" filter="url(#softGlow)" />
+  <circle cx="256" cy="220" r="5" fill="#0284C7" />
+
+  <!-- Typography -->
+  <text x="256" y="420" text-anchor="middle" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="34" font-weight="800" letter-spacing="4" fill="#FFFFFF">
+    HA HEATING
+  </text>
+  <text x="256" y="450" text-anchor="middle" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="14" font-weight="600" letter-spacing="2" fill="#94A3B8">
+    HYBRIDE KLIMAAT REGELING
+  </text>
+</svg>
+

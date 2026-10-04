@@ -77,20 +77,9 @@ class HAHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.ConfigFlowResult:
         """Handle the initial step."""
-        hub_entries = [
-            entry
-            for entry in self._async_current_entries()
-            if entry.data.get(CONF_ENTRY_TYPE) == ENTRY_TYPE_HUB
-        ]
-
-        # If no central hub has been configured yet, route directly to hub setup
-        if not hub_entries:
-            return await self.async_step_hub(user_input)
-
-        # Otherwise show menu: add room or reconfigure hub
         return self.async_show_menu(
             step_id="user",
-            menu_options=["room", "hub"],
+            menu_options=["hub", "room"],
         )
 
     async def async_step_hub(
@@ -131,11 +120,13 @@ class HAHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             {"value": CYCLE_ANCHOR_DATE, "label": "14-daagse Cyclus vanaf Startdatum"},
                             {"value": CYCLE_EXTERNAL_ENTITY, "label": "Externe Sensor / Helper"},
                         ],
-                        mode=selector.SelectMode.DROPDOWN,
+                        mode=selector.SelectSelectorMode.DROPDOWN,
                     )
                 ),
                 vol.Optional(CONF_CYCLE_ANCHOR_DATE): str,
-                vol.Optional(CONF_CYCLE_ENTITY): selector.EntitySelector(),
+                vol.Optional(CONF_CYCLE_ENTITY): selector.EntitySelector(
+                    selector.EntitySelectorConfig()
+                ),
             }
         )
 
@@ -193,7 +184,7 @@ class HAHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             {"value": MASTER_MODE_HVAC_SWITCH, "label": "HVAC Switch (Heat vs Off)"},
                             {"value": MASTER_MODE_BOTH, "label": "Gecombineerd (Beide)"},
                         ],
-                        mode=selector.SelectMode.DROPDOWN,
+                        mode=selector.SelectSelectorMode.DROPDOWN,
                     )
                 ),
                 vol.Optional(
@@ -312,7 +303,7 @@ class HAHeatingOptionsFlowHandler(config_entries.OptionsFlow):
                                 {"value": CYCLE_ANCHOR_DATE, "label": "14-daagse Cyclus vanaf Startdatum"},
                                 {"value": CYCLE_EXTERNAL_ENTITY, "label": "Externe Sensor / Helper"},
                             ],
-                            mode=selector.SelectMode.DROPDOWN,
+                            mode=selector.SelectSelectorMode.DROPDOWN,
                         )
                     ),
                 }
@@ -354,7 +345,7 @@ class HAHeatingOptionsFlowHandler(config_entries.OptionsFlow):
                                 {"value": MASTER_MODE_HVAC_SWITCH, "label": "HVAC Switch (Heat vs Off)"},
                                 {"value": MASTER_MODE_BOTH, "label": "Gecombineerd (Beide)"},
                             ],
-                            mode=selector.SelectMode.DROPDOWN,
+                            mode=selector.SelectSelectorMode.DROPDOWN,
                         )
                     ),
                     vol.Optional(
