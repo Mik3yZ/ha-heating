@@ -79,3 +79,19 @@ class HAHeatingSystemSensor(CoordinatorEntity[HAHeatingCoordinator], SensorEntit
             return round(val, 3)
         return val
 
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return detailed attributes for sensor inspection."""
+        data = self.coordinator.data or {}
+        if self._key == "arbitrage_reason":
+            return {
+                "should_use_ac": data.get("should_use_ac"),
+                "airco_cop": data.get("airco_cop"),
+                "thermal_cost_gas": data.get("thermal_cost_gas"),
+                "thermal_cost_electric": data.get("thermal_cost_electric"),
+                "solar_export": data.get("solar_export"),
+                "outdoor_temp": data.get("outdoor_temp"),
+            }
+        return {}
+
+

@@ -106,13 +106,13 @@ class HAHeatingCoordinator(DataUpdateCoordinator[dict]):
 
     async def async_setup(self) -> None:
         """Start tracking state changes and timer intervals."""
+        # Only track discrete state changes (calendar vacation & schedule helpers).
+        # Continuous numeric sensors (solar export, outdoor temperature, energy tariffs)
+        # are sampled strictly on the 60-second periodic coordinator interval to prevent
+        # log spam and rapid state-machine thrashing.
         watched_entities = set()
 
         for key in (
-            CONF_GAS_PRICE_SENSOR,
-            CONF_ELECTRIC_PRICE_SENSOR,
-            CONF_OUTDOOR_TEMP_SENSOR,
-            CONF_SOLAR_EXPORT_SENSOR,
             CONF_VACATION_CALENDAR,
             CONF_CYCLE_ENTITY,
         ):

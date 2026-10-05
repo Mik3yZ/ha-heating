@@ -104,7 +104,7 @@ class EnergyArbitrage:
 
         # If solar export is available, AC is free
         if solar_export_watts is not None and solar_export_watts > 300:
-            return True, f"Solar surplus available ({solar_export_watts:.0f} W export)"
+            return True, "Solar surplus available (Airco prioritized)"
 
         # Severe frost bivalency safety check: below -7°C radiators give superior comfort and less cycling
         if outdoor_temp is not None and outdoor_temp < -7.0:
