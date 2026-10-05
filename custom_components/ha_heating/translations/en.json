@@ -37,7 +37,7 @@
           "window_close_delay": "Window close delay (seconds)",
           "master_thermostat": "Linked Master Thermostat (optional)",
           "master_control_mode": "Master control mode",
-          "master_boost_temp": "Master target temp when demand active (°C)",
+          "master_boost_offset": "Master temperature boost offset on demand (+°C above current temp)",
           "master_idle_temp": "Master idle temp (°C)",
           "ac_entity": "Airco climate entity (optional)",
           "ac_quiet_start": "AC quiet hours start (e.g. 22:00)",

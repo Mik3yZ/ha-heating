@@ -6,10 +6,11 @@ from datetime import datetime, timedelta
 import logging
 
 from homeassistant.components.climate import HVACMode
-from homeassistant.core import HomeAssistant
+from homeassistant.core import Event, HomeAssistant, callback
 
 from .const import (
     DEFAULT_HYSTERESIS_ON,
+    DEFAULT_MASTER_BOOST_OFFSET,
     DEFAULT_MASTER_BOOST_TEMP,
     DEFAULT_MASTER_IDLE_TEMP,
     DEFAULT_MIN_CYCLE_DURATION,
@@ -30,25 +31,38 @@ class MasterThermostatController:
         hass: HomeAssistant,
         master_entity_id: str,
         control_mode: str = MASTER_MODE_SETPOINT_BOOST,
-        boost_temp: float = DEFAULT_MASTER_BOOST_TEMP,
+        boost_offset: float = DEFAULT_MASTER_BOOST_OFFSET,
         idle_temp: float = DEFAULT_MASTER_IDLE_TEMP,
         min_cycle_duration_sec: int = DEFAULT_MIN_CYCLE_DURATION,
         min_off_duration_sec: int = DEFAULT_MIN_OFF_DURATION,
+        boost_temp: float | None = None,
+        boost_fallback_temp: float = DEFAULT_MASTER_BOOST_TEMP,
     ) -> None:
         """Initialize controller for a specific master thermostat."""
         self.hass = hass
         self.master_entity_id = master_entity_id
         self.control_mode = control_mode
-        self.boost_temp = boost_temp
         self.idle_temp = idle_temp
         self.min_cycle_duration_sec = min_cycle_duration_sec
         self.min_off_duration_sec = min_off_duration_sec
+
+        if boost_temp is not None:
+            if boost_temp > 15.0:
+                self.boost_fallback_temp = boost_temp
+                self.boost_offset = DEFAULT_MASTER_BOOST_OFFSET
+            else:
+                self.boost_offset = boost_temp
+                self.boost_fallback_temp = boost_fallback_temp
+        else:
+            self.boost_offset = boost_offset
+            self.boost_fallback_temp = boost_fallback_temp
 
         self.linked_rooms: set[str] = set()
         self.active_demanding_rooms: set[str] = set()
 
         self._is_active: bool = False
         self._last_state_change: datetime | None = None
+        self._unsub_listener = None
 
     @property
     def is_heating_active(self) -> bool:
@@ -140,18 +154,43 @@ class MasterThermostatController:
                 err,
             )
 
+    def calculate_boost_temp(self) -> float:
+        """Calculate target setpoint as current_temperature + boost_offset (capped at max_temp)."""
+        try:
+            if self.hass and hasattr(self.hass, "states"):
+                state = self.hass.states.get(self.master_entity_id)
+                if state and state.attributes:
+                    current_temp = state.attributes.get("current_temperature")
+                    max_temp = float(state.attributes.get("max_temp", 35.0))
+                    if current_temp is not None:
+                        calc = float(current_temp) + self.boost_offset
+                        return round(min(calc, max_temp), 1)
+        except Exception as err:
+            _LOGGER.debug(
+                "Error calculating boost temp for %s: %s", self.master_entity_id, err
+            )
+
+        return self.boost_fallback_temp
+
     async def _activate_master(self) -> None:
         """Command master thermostat to generate heat."""
         if self.control_mode in (
             MASTER_MODE_SETPOINT_BOOST,
             MASTER_MODE_BOTH,
         ):
+            target_temp = self.calculate_boost_temp()
+            _LOGGER.info(
+                "Master '%s': Activating heat demand with setpoint %.1f°C (+%.1f°C offset)",
+                self.master_entity_id,
+                target_temp,
+                self.boost_offset,
+            )
             await self.hass.services.async_call(
                 "climate",
                 "set_temperature",
                 {
                     "entity_id": self.master_entity_id,
-                    "temperature": self.boost_temp,
+                    "temperature": target_temp,
                 },
                 blocking=True,
             )
@@ -173,6 +212,11 @@ class MasterThermostatController:
             MASTER_MODE_SETPOINT_BOOST,
             MASTER_MODE_BOTH,
         ):
+            _LOGGER.info(
+                "Master '%s': Returning setpoint to idle %.1f°C",
+                self.master_entity_id,
+                self.idle_temp,
+            )
             await self.hass.services.async_call(
                 "climate",
                 "set_temperature",
@@ -193,4 +237,81 @@ class MasterThermostatController:
                 },
                 blocking=True,
             )
+
+    async def async_handle_master_state_change(self) -> None:
+        """Ensure setpoint stays above current temperature while demand is active."""
+        if not self._is_active:
+            return
+        if self.control_mode not in (MASTER_MODE_SETPOINT_BOOST, MASTER_MODE_BOTH):
+            return
+
+        try:
+            if not self.hass or not hasattr(self.hass, "states"):
+                return
+            state = self.hass.states.get(self.master_entity_id)
+            if not state or not state.attributes:
+                return
+
+            current_temp = state.attributes.get("current_temperature")
+            set_temp = state.attributes.get("temperature")
+            max_temp = float(state.attributes.get("max_temp", 35.0))
+
+            if current_temp is not None and set_temp is not None:
+                current_temp = float(current_temp)
+                set_temp = float(set_temp)
+                # If current temp approaches setpoint within 0.5°C and not yet at max_temp
+                if current_temp >= (set_temp - 0.5) and set_temp < max_temp:
+                    new_target = round(min(current_temp + self.boost_offset, max_temp), 1)
+                    if new_target > set_temp:
+                        _LOGGER.info(
+                            "Master '%s': Current temp (%.1f°C) approached setpoint (%.1f°C) with active demand. Bumping to %.1f°C",
+                            self.master_entity_id,
+                            current_temp,
+                            set_temp,
+                            new_target,
+                        )
+                        await self.hass.services.async_call(
+                            "climate",
+                            "set_temperature",
+                            {
+                                "entity_id": self.master_entity_id,
+                                "temperature": new_target,
+                            },
+                            blocking=True,
+                        )
+        except Exception as err:
+            _LOGGER.debug("Error in master thermostat setpoint maintenance: %s", err)
+
+    def start_tracking(self) -> None:
+        """Start tracking master thermostat state changes."""
+        if self._unsub_listener is not None:
+            return
+
+        try:
+            from homeassistant.helpers.event import async_track_state_change_event
+
+            @callback
+            def _handle_master_state_change(event: Event) -> None:
+                if self._is_active:
+                    self.hass.async_create_task(self.async_handle_master_state_change())
+
+            if hasattr(self.hass, "bus"):
+                self._unsub_listener = async_track_state_change_event(
+                    self.hass, [self.master_entity_id], _handle_master_state_change
+                )
+        except Exception as err:
+            _LOGGER.debug(
+                "Could not attach state change tracker to master %s: %s",
+                self.master_entity_id,
+                err,
+            )
+
+    def stop_tracking(self) -> None:
+        """Stop tracking master thermostat state changes."""
+        if self._unsub_listener:
+            try:
+                self._unsub_listener()
+            except Exception:
+                pass
+            self._unsub_listener = None
 

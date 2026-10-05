@@ -32,6 +32,7 @@ from .const import (
     CONF_ELECTRIC_PRICE_SENSOR,
     CONF_ENTRY_TYPE,
     CONF_GAS_PRICE_SENSOR,
+    CONF_MASTER_BOOST_OFFSET,
     CONF_MASTER_BOOST_TEMP,
     CONF_MASTER_CONTROL_MODE,
     CONF_MASTER_IDLE_TEMP,
@@ -56,6 +57,7 @@ from .const import (
     CYCLE_ANCHOR_DATE,
     CYCLE_EXTERNAL_ENTITY,
     CYCLE_ISO_EVEN_ODD,
+    DEFAULT_MASTER_BOOST_OFFSET,
     DEFAULT_MASTER_BOOST_TEMP,
     DEFAULT_MASTER_IDLE_TEMP,
     DEFAULT_TEMP_AWAY,
@@ -86,6 +88,11 @@ class HAHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Handle the initial step."""
+        # If Hub is already configured, direct user straight to adding rooms
+        for entry in self._async_current_entries():
+            if entry.data.get(CONF_ENTRY_TYPE) == ENTRY_TYPE_HUB:
+                return await self.async_step_room(user_input)
+
         return self.async_show_menu(
             step_id="user",
             menu_options=["hub", "room"],
@@ -97,7 +104,14 @@ class HAHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Handle central hub setup."""
         errors: dict[str, str] = {}
 
+        # Abort if central hub is already configured
+        for entry in self._async_current_entries():
+            if entry.data.get(CONF_ENTRY_TYPE) == ENTRY_TYPE_HUB:
+                return self.async_abort(reason="already_configured")
+
         if user_input is not None:
+            await self.async_set_unique_id("ha_heating_central_hub")
+            self._abort_if_unique_id_configured()
             user_input[CONF_ENTRY_TYPE] = ENTRY_TYPE_HUB
             return self.async_create_entry(
                 title="HA Heating Central Hub",
@@ -121,7 +135,7 @@ class HAHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(CONF_VACATION_CALENDAR): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="calendar")
                 ),
-                vol.Optional(CONF_CALENDAR_FILTER, default="Vakantie"): str,
+                vol.Optional(CONF_CALENDAR_FILTER, default="Vakantie"): selector.TextSelector(),
                 vol.Required(CONF_CYCLE_TYPE, default=CYCLE_ISO_EVEN_ODD): selector.SelectSelector(
                     selector.SelectSelectorConfig(
                         options=[
@@ -132,7 +146,7 @@ class HAHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         mode=selector.SelectSelectorMode.DROPDOWN,
                     )
                 ),
-                vol.Optional(CONF_CYCLE_ANCHOR_DATE): str,
+                vol.Optional(CONF_CYCLE_ANCHOR_DATE): selector.TextSelector(),
                 vol.Optional(CONF_CYCLE_ENTITY): selector.EntitySelector(
                     selector.EntitySelectorConfig()
                 ),
@@ -172,6 +186,10 @@ class HAHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 user_input[CONF_ROOM_NAME] = room_name
                 user_input[CONF_ENTRY_TYPE] = ENTRY_TYPE_ROOM
 
+                if area_id:
+                    await self.async_set_unique_id(f"ha_heating_room_{area_id}")
+                    self._abort_if_unique_id_configured()
+
                 return self.async_create_entry(
                     title=f"Kamer: {room_name}",
                     data=user_input,
@@ -182,7 +200,7 @@ class HAHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_AREA_ID): selector.AreaSelector(
                     selector.AreaSelectorConfig()
                 ),
-                vol.Optional(CONF_ROOM_NAME): str,
+                vol.Optional(CONF_ROOM_NAME): selector.TextSelector(),
                 vol.Optional(CONF_ROOM_TEMP_SENSOR): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 ),
@@ -218,21 +236,25 @@ class HAHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     )
                 ),
                 vol.Optional(
-                    CONF_MASTER_BOOST_TEMP, default=DEFAULT_MASTER_BOOST_TEMP
+                    CONF_MASTER_BOOST_OFFSET, default=DEFAULT_MASTER_BOOST_OFFSET
                 ): selector.NumberSelector(
-                    selector.NumberSelectorConfig(min=18, max=32, step=0.5)
+                    selector.NumberSelectorConfig(
+                        min=1.0, max=10.0, step=0.5, unit_of_measurement="°C"
+                    )
                 ),
                 vol.Optional(
                     CONF_MASTER_IDLE_TEMP, default=DEFAULT_MASTER_IDLE_TEMP
                 ): selector.NumberSelector(
-                    selector.NumberSelectorConfig(min=5, max=20, step=0.5)
+                    selector.NumberSelectorConfig(
+                        min=5.0, max=20.0, step=0.5, unit_of_measurement="°C"
+                    )
                 ),
                 vol.Optional(CONF_AC_ENTITY): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="climate")
                 ),
-                vol.Optional(CONF_AC_QUIET_START, default="22:00"): str,
-                vol.Optional(CONF_AC_QUIET_END, default="07:00"): str,
-                vol.Optional(CONF_AC_ENABLE_COOLING, default=True): bool,
+                vol.Optional(CONF_AC_QUIET_START, default="22:00"): selector.TextSelector(),
+                vol.Optional(CONF_AC_QUIET_END, default="07:00"): selector.TextSelector(),
+                vol.Optional(CONF_AC_ENABLE_COOLING, default=True): selector.BooleanSelector(),
                 vol.Optional(CONF_SCHEDULE_WEEK_A): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="schedule")
                 ),
@@ -278,9 +300,13 @@ class HAHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 class HAHeatingOptionsFlowHandler(config_entries.OptionsFlow):
     """Handle options for HA Heating entries."""
 
-    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
+    def __init__(self, config_entry: config_entries.ConfigEntry | None = None) -> None:
         """Initialize options flow."""
-        self.config_entry = config_entry
+        if config_entry is not None:
+            try:
+                self.config_entry = config_entry
+            except AttributeError:
+                pass
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
@@ -322,7 +348,7 @@ class HAHeatingOptionsFlowHandler(config_entries.OptionsFlow):
                     vol.Optional(
                         CONF_CALENDAR_FILTER,
                         default=current_data.get(CONF_CALENDAR_FILTER, "Vakantie"),
-                    ): str,
+                    ): selector.TextSelector(),
                     vol.Required(
                         CONF_CYCLE_TYPE,
                         default=current_data.get(CONF_CYCLE_TYPE, CYCLE_ISO_EVEN_ODD),
@@ -348,7 +374,7 @@ class HAHeatingOptionsFlowHandler(config_entries.OptionsFlow):
                     vol.Optional(
                         CONF_ROOM_NAME,
                         default=current_data.get(CONF_ROOM_NAME, "Room"),
-                    ): str,
+                    ): selector.TextSelector(),
                     vol.Optional(
                         CONF_ROOM_TEMP_SENSOR,
                         description={"suggested_value": current_data.get(CONF_ROOM_TEMP_SENSOR)},
@@ -383,17 +409,37 @@ class HAHeatingOptionsFlowHandler(config_entries.OptionsFlow):
                         )
                     ),
                     vol.Optional(
+                        CONF_MASTER_BOOST_OFFSET,
+                        default=current_data.get(
+                            CONF_MASTER_BOOST_OFFSET, DEFAULT_MASTER_BOOST_OFFSET
+                        ),
+                    ): selector.NumberSelector(
+                        selector.NumberSelectorConfig(
+                            min=1.0, max=10.0, step=0.5, unit_of_measurement="°C"
+                        )
+                    ),
+                    vol.Optional(
+                        CONF_MASTER_IDLE_TEMP,
+                        default=current_data.get(
+                            CONF_MASTER_IDLE_TEMP, DEFAULT_MASTER_IDLE_TEMP
+                        ),
+                    ): selector.NumberSelector(
+                        selector.NumberSelectorConfig(
+                            min=5.0, max=20.0, step=0.5, unit_of_measurement="°C"
+                        )
+                    ),
+                    vol.Optional(
                         CONF_AC_ENTITY,
                         description={"suggested_value": current_data.get(CONF_AC_ENTITY)},
                     ): selector.EntitySelector(selector.EntitySelectorConfig(domain="climate")),
                     vol.Optional(
                         CONF_AC_QUIET_START,
                         default=current_data.get(CONF_AC_QUIET_START, "22:00"),
-                    ): str,
+                    ): selector.TextSelector(),
                     vol.Optional(
                         CONF_AC_QUIET_END,
                         default=current_data.get(CONF_AC_QUIET_END, "07:00"),
-                    ): str,
+                    ): selector.TextSelector(),
                     vol.Optional(
                         CONF_TEMP_COMFORT,
                         default=current_data.get(CONF_TEMP_COMFORT, DEFAULT_TEMP_COMFORT),

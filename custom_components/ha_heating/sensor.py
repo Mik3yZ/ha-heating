@@ -29,7 +29,7 @@ async def async_setup_entry(
 
     entities = [
         HAHeatingSystemSensor(coordinator, "active_week", "HA Heating Actieve Week", icon="mdi:calendar-week"),
-        HAHeatingSystemSensor(coordinator, "airco_cop", "HA Heating Airco COP", state_class=SensorStateClass.MEASUREMENT, icon="mdi:heat-pump-outline"),
+        HAHeatingSystemSensor(coordinator, "airco_cop", "HA Heating Airco COP", icon="mdi:heat-pump-outline"),
         HAHeatingSystemSensor(coordinator, "thermal_cost_gas", "HA Heating Thermische Kosten Gas", unit="€/kWh", state_class=SensorStateClass.MEASUREMENT, icon="mdi:fire"),
         HAHeatingSystemSensor(coordinator, "thermal_cost_electric", "HA Heating Thermische Kosten Airco", unit="€/kWh", state_class=SensorStateClass.MEASUREMENT, icon="mdi:lightning-bolt"),
         HAHeatingSystemSensor(coordinator, "arbitrage_reason", "HA Heating Arbitrage Advies", icon="mdi:scale-balance"),

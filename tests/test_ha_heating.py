@@ -280,6 +280,97 @@ class TestMasterThermostatController(unittest.IsolatedAsyncioTestCase):
         await controller.update_room_demand("slaapkamer_1", False, t2)
         self.assertFalse(controller.is_heating_active)
 
+    async def test_dynamic_boost_offset_calculation(self):
+        from unittest.mock import MagicMock
+        from custom_components.ha_heating.heat_demand import MasterThermostatController
+
+        hass_mock = MagicMock()
+        master_state = MagicMock()
+        master_state.attributes = {"current_temperature": 19.5, "max_temp": 35.0}
+        hass_mock.states.get.return_value = master_state
+
+        controller = MasterThermostatController(
+            hass=hass_mock,
+            master_entity_id="climate.thermostaat_boven",
+            boost_offset=5.0,
+            idle_temp=15.0,
+        )
+
+        # 19.5 + 5.0 = 24.5
+        self.assertEqual(controller.calculate_boost_temp(), 24.5)
+
+        # House already warm: 26.0 + 5.0 = 31.0
+        master_state.attributes["current_temperature"] = 26.0
+        self.assertEqual(controller.calculate_boost_temp(), 31.0)
+
+        # Capped at max_temp (35.0)
+        master_state.attributes["current_temperature"] = 33.0
+        self.assertEqual(controller.calculate_boost_temp(), 35.0)
+
+        # Fallback when current_temperature unavailable
+        master_state.attributes["current_temperature"] = None
+        self.assertEqual(controller.calculate_boost_temp(), 25.0)
+
+    async def test_activation_and_setpoint_bumping(self):
+        from unittest.mock import AsyncMock, MagicMock
+        from custom_components.ha_heating.heat_demand import MasterThermostatController
+
+        hass_mock = MagicMock()
+        hass_mock.services.async_call = AsyncMock()
+
+        master_state = MagicMock()
+        master_state.attributes = {
+            "current_temperature": 20.0,
+            "temperature": 15.0,
+            "max_temp": 35.0,
+        }
+        hass_mock.states.get.return_value = master_state
+
+        controller = MasterThermostatController(
+            hass=hass_mock,
+            master_entity_id="climate.thermostaat_boven",
+            boost_offset=5.0,
+            idle_temp=15.0,
+            min_cycle_duration_sec=0,
+            min_off_duration_sec=0,
+        )
+        controller.register_room("kamer_1")
+
+        now = datetime(2026, 10, 4, 12, 0, 0)
+        await controller.update_room_demand("kamer_1", True, now)
+        self.assertTrue(controller.is_heating_active)
+
+        # Activated with 20.0 + 5.0 = 25.0
+        hass_mock.services.async_call.assert_called_with(
+            "climate",
+            "set_temperature",
+            {"entity_id": "climate.thermostaat_boven", "temperature": 25.0},
+            blocking=True,
+        )
+
+        # Room warms up to 24.7°C (approaching 25.0°C setpoint within 0.5°C)
+        master_state.attributes["current_temperature"] = 24.7
+        master_state.attributes["temperature"] = 25.0
+        await controller.async_handle_master_state_change()
+
+        # Bumps to 24.7 + 5.0 = 29.7°C to keep boiler firing
+        hass_mock.services.async_call.assert_called_with(
+            "climate",
+            "set_temperature",
+            {"entity_id": "climate.thermostaat_boven", "temperature": 29.7},
+            blocking=True,
+        )
+
+        # Deactivation returns to idle (15.0°C)
+        await controller.update_room_demand("kamer_1", False, now)
+        self.assertFalse(controller.is_heating_active)
+        hass_mock.services.async_call.assert_called_with(
+            "climate",
+            "set_temperature",
+            {"entity_id": "climate.thermostaat_boven", "temperature": 15.0},
+            blocking=True,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

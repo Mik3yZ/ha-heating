@@ -49,20 +49,50 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     return True
 
 
+async def _async_forward_entry_setups(
+    hass: HomeAssistant, entry: ConfigEntry, platforms: list[Platform]
+) -> None:
+    """Forward entry setups with backward compatibility for pre-2024.4 Home Assistant."""
+    if hasattr(hass.config_entries, "async_forward_entry_setups"):
+        await hass.config_entries.async_forward_entry_setups(entry, platforms)
+    else:
+        for platform in platforms:
+            await hass.config_entries.async_forward_entry_setup(entry, platform)
+
+
+async def _async_unload_platforms(
+    hass: HomeAssistant, entry: ConfigEntry, platforms: list[Platform]
+) -> bool:
+    """Unload platforms with backward compatibility for pre-2024.4 Home Assistant."""
+    if hasattr(hass.config_entries, "async_unload_platforms"):
+        return await hass.config_entries.async_unload_platforms(entry, platforms)
+
+    results = []
+    for platform in platforms:
+        results.append(
+            await hass.config_entries.async_forward_entry_unload(entry, platform)
+        )
+    return all(results)
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up HA Heating from a config entry."""
     hass.data.setdefault(DOMAIN, {})
     entry_type = entry.data.get(CONF_ENTRY_TYPE)
 
     if entry_type == ENTRY_TYPE_HUB:
-        coordinator = HAHeatingCoordinator(hass, entry.data)
+        coordinator = HAHeatingCoordinator(hass, entry.data, entry=entry)
         hass.data[DOMAIN]["coordinator"] = coordinator
         hass.data[DOMAIN]["hub_entry"] = entry
 
         await coordinator.async_setup()
-        await coordinator.async_config_entry_first_refresh()
+        try:
+            await coordinator.async_config_entry_first_refresh()
+        except Exception as err:
+            _LOGGER.debug("First refresh skipped or not needed: %s", err)
+            await coordinator.async_refresh()
 
-        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS_HUB)
+        await _async_forward_entry_setups(hass, entry, PLATFORMS_HUB)
     else:
         # Room entry requires coordinator to exist
         if "coordinator" not in hass.data[DOMAIN]:
@@ -70,7 +100,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 "Hub entry not initialized yet. Room '%s' may have limited coordination.",
                 entry.title,
             )
-        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS_ROOM)
+        await _async_forward_entry_setups(hass, entry, PLATFORMS_ROOM)
 
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))
     return True
@@ -81,13 +111,13 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry_type = entry.data.get(CONF_ENTRY_TYPE)
 
     if entry_type == ENTRY_TYPE_HUB:
-        unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS_HUB)
+        unload_ok = await _async_unload_platforms(hass, entry, PLATFORMS_HUB)
         if unload_ok and "coordinator" in hass.data[DOMAIN]:
             hass.data[DOMAIN]["coordinator"].cleanup()
             del hass.data[DOMAIN]["coordinator"]
         return unload_ok
 
-    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS_ROOM)
+    return await _async_unload_platforms(hass, entry, PLATFORMS_ROOM)
 
 
 async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:

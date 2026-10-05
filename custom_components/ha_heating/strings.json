@@ -37,7 +37,7 @@
           "window_close_delay": "Raam sluiten herstelvertraging (seconden)",
           "master_thermostat": "Gekoppelde Master-Thermostaat (optioneel)",
           "master_control_mode": "Aansturingsmethode Master",
-          "master_boost_temp": "Master streeftemperatuur bij vraag (°C)",
+          "master_boost_offset": "Master temperatuur verhoging bij vraag (+°C boven huidige temp)",
           "master_idle_temp": "Master rusttemperatuur (°C)",
           "ac_entity": "Airco klimaatentiteit (optioneel)",
           "ac_quiet_start": "Airco stille tijd start (bijv. 22:00)",

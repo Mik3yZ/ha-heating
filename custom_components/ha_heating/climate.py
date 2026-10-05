@@ -28,6 +28,7 @@ from .const import (
     CONF_AC_QUIET_START,
     CONF_AREA_ID,
     CONF_ENTRY_TYPE,
+    CONF_MASTER_BOOST_OFFSET,
     CONF_MASTER_BOOST_TEMP,
     CONF_MASTER_CONTROL_MODE,
     CONF_MASTER_IDLE_TEMP,
@@ -49,6 +50,7 @@ from .const import (
     DEFAULT_AC_COOL_DEADBAND,
     DEFAULT_FROST_TEMP,
     DEFAULT_HYSTERESIS_ON,
+    DEFAULT_MASTER_BOOST_OFFSET,
     DEFAULT_MASTER_BOOST_TEMP,
     DEFAULT_MASTER_IDLE_TEMP,
     DEFAULT_TEMP_AWAY,
@@ -134,16 +136,26 @@ class HAHeatingRoomClimate(CoordinatorEntity[HAHeatingCoordinator], ClimateEntit
         self._master_entity: str | None = self._config.get(CONF_MASTER_THERMOSTAT)
         self._master_controller = None
         if self._master_entity:
+            raw_boost = float(
+                self._config.get(
+                    CONF_MASTER_BOOST_OFFSET,
+                    self._config.get(CONF_MASTER_BOOST_TEMP, DEFAULT_MASTER_BOOST_OFFSET),
+                )
+            )
+            boost_offset = (
+                DEFAULT_MASTER_BOOST_OFFSET if raw_boost > 15.0 else raw_boost
+            )
+
             self._master_controller = coordinator.get_or_create_master_controller(
                 master_entity_id=self._master_entity,
                 control_mode=self._config.get(
                     CONF_MASTER_CONTROL_MODE, MASTER_MODE_SETPOINT_BOOST
                 ),
-                boost_temp=self._config.get(
-                    CONF_MASTER_BOOST_TEMP, DEFAULT_MASTER_BOOST_TEMP
-                ),
-                idle_temp=self._config.get(
-                    CONF_MASTER_IDLE_TEMP, DEFAULT_MASTER_IDLE_TEMP
+                boost_offset=boost_offset,
+                idle_temp=float(
+                    self._config.get(
+                        CONF_MASTER_IDLE_TEMP, DEFAULT_MASTER_IDLE_TEMP
+                    )
                 ),
             )
             self._master_controller.register_room(self._room_id)

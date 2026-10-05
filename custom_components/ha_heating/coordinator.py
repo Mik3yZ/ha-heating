@@ -6,6 +6,7 @@ import asyncio
 from datetime import datetime, timedelta
 import logging
 
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import CALLBACK_TYPE, Event, HomeAssistant, callback
 from homeassistant.helpers.event import (
     async_track_state_change_event,
@@ -24,6 +25,8 @@ from .const import (
     CONF_SOLAR_EXPORT_SENSOR,
     CONF_VACATION_CALENDAR,
     CYCLE_ISO_EVEN_ODD,
+    DEFAULT_MASTER_BOOST_OFFSET,
+    DEFAULT_MASTER_IDLE_TEMP,
     DOMAIN,
 )
 from .energy_arbitrage import EnergyArbitrage
@@ -37,14 +40,31 @@ _LOGGER = logging.getLogger(__name__)
 class HAHeatingCoordinator(DataUpdateCoordinator[dict]):
     """Central hub coordinator managing energy arbitrage, schedules, masters and windows."""
 
-    def __init__(self, hass: HomeAssistant, hub_config: dict) -> None:
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        hub_config: dict,
+        entry: ConfigEntry | None = None,
+    ) -> None:
         """Initialize central coordinator."""
-        super().__init__(
-            hass,
-            _LOGGER,
-            name=DOMAIN,
-            update_interval=timedelta(seconds=60),
-        )
+        try:
+            super().__init__(
+                hass,
+                _LOGGER,
+                name=DOMAIN,
+                update_interval=timedelta(seconds=60),
+                config_entry=entry,
+            )
+        except TypeError:
+            super().__init__(
+                hass,
+                _LOGGER,
+                name=DOMAIN,
+                update_interval=timedelta(seconds=60),
+            )
+            if entry is not None:
+                self.config_entry = entry
+
         self.hub_config = hub_config
 
         # Core logic engines
@@ -66,20 +86,22 @@ class HAHeatingCoordinator(DataUpdateCoordinator[dict]):
         self,
         master_entity_id: str,
         control_mode: str,
-        boost_temp: float,
-        idle_temp: float,
+        boost_offset: float = DEFAULT_MASTER_BOOST_OFFSET,
+        idle_temp: float = DEFAULT_MASTER_IDLE_TEMP,
+        boost_temp: float | None = None,
     ) -> MasterThermostatController:
         """Get or initialize a MasterThermostatController for a given entity."""
         if master_entity_id not in self.master_controllers:
-            self.master_controllers[master_entity_id] = (
-                MasterThermostatController(
-                    hass=self.hass,
-                    master_entity_id=master_entity_id,
-                    control_mode=control_mode,
-                    boost_temp=boost_temp,
-                    idle_temp=idle_temp,
-                )
+            ctrl = MasterThermostatController(
+                hass=self.hass,
+                master_entity_id=master_entity_id,
+                control_mode=control_mode,
+                boost_offset=boost_offset,
+                idle_temp=idle_temp,
+                boost_temp=boost_temp,
             )
+            ctrl.start_tracking()
+            self.master_controllers[master_entity_id] = ctrl
         return self.master_controllers[master_entity_id]
 
     async def async_setup(self) -> None:
@@ -188,4 +210,7 @@ class HAHeatingCoordinator(DataUpdateCoordinator[dict]):
             unsub()
         self._unsub_listeners.clear()
         self.window_manager.cleanup()
+        for ctrl in self.master_controllers.values():
+            ctrl.stop_tracking()
+        self.master_controllers.clear()
 
