@@ -70,6 +70,12 @@
         "description": "Update settings for this room or central system."
       }
     }
+  },
+  "services": {
+    "generate_dashboard": {
+      "name": "Generate Dashboard",
+      "description": "Reads current HA Heating configuration and generates a ready-to-use custom Lovelace dashboard (/config/ha_heating_dashboard.yaml)."
+    }
   }
 }
 

@@ -104,6 +104,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})
     entry_type = entry.data.get(CONF_ENTRY_TYPE)
 
+    # Ensure dashboard generator action is registered
+    if not hass.services.has_service(DOMAIN, "generate_dashboard"):
+        await async_setup_dashboard_service(hass)
+
     if entry_type == ENTRY_TYPE_HUB:
         coordinator = HAHeatingCoordinator(hass, entry.data, entry=entry)
         hass.data[DOMAIN]["coordinator"] = coordinator

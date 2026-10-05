@@ -325,6 +325,9 @@ async def async_generate_dashboard(hass: HomeAssistant) -> str:
 
 async def async_setup_dashboard_service(hass: HomeAssistant) -> None:
     """Register the ha_heating.generate_dashboard service."""
+    if hass.services.has_service(DOMAIN, "generate_dashboard"):
+        return
+
     async def _handle_generate(call: ServiceCall) -> None:
         await async_generate_dashboard(hass)
 
@@ -333,3 +336,4 @@ async def async_setup_dashboard_service(hass: HomeAssistant) -> None:
         "generate_dashboard",
         _handle_generate,
     )
+    _LOGGER.info("Registered action ha_heating.generate_dashboard")
