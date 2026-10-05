@@ -8,7 +8,10 @@ from pathlib import Path
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
-from homeassistant.components.http import StaticPathConfig
+try:
+    from homeassistant.components.http import StaticPathConfig
+except ImportError:
+    StaticPathConfig = None
 
 from .const import CONF_ENTRY_TYPE, DOMAIN, ENTRY_TYPE_HUB, ENTRY_TYPE_ROOM
 from .coordinator import HAHeatingCoordinator
@@ -29,11 +32,15 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     if card_path.exists():
         try:
             # Home Assistant 2024+ async_register_static_paths support
-            if hasattr(hass.http, "async_register_static_paths"):
+            if (
+                hasattr(hass, "http")
+                and hasattr(hass.http, "async_register_static_paths")
+                and StaticPathConfig is not None
+            ):
                 await hass.http.async_register_static_paths([
                     StaticPathConfig("/ha_heating_card/ha-heating-card.js", str(card_path), False)
                 ])
-            else:
+            elif hasattr(hass, "http") and hasattr(hass.http, "register_static_path"):
                 hass.http.register_static_path("/ha_heating_card/ha-heating-card.js", str(card_path), False)
             _LOGGER.info("Registered static path for /ha_heating_card/ha-heating-card.js")
         except Exception as err:

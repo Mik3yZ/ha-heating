@@ -11,6 +11,14 @@ from homeassistant import config_entries
 from homeassistant.core import callback
 from homeassistant.helpers import area_registry as ar, selector
 
+try:
+    from homeassistant.config_entries import ConfigFlowResult
+except ImportError:
+    try:
+        from homeassistant.data_entry_flow import FlowResult as ConfigFlowResult
+    except ImportError:
+        ConfigFlowResult = Any
+
 from .const import (
     CONF_AC_ENABLE_COOLING,
     CONF_AC_ENTITY,
@@ -76,7 +84,7 @@ class HAHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
-    ) -> config_entries.ConfigFlowResult:
+    ) -> ConfigFlowResult:
         """Handle the initial step."""
         return self.async_show_menu(
             step_id="user",
@@ -85,7 +93,7 @@ class HAHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_hub(
         self, user_input: dict[str, Any] | None = None
-    ) -> config_entries.ConfigFlowResult:
+    ) -> ConfigFlowResult:
         """Handle central hub setup."""
         errors: dict[str, str] = {}
 
@@ -139,7 +147,7 @@ class HAHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_room(
         self, user_input: dict[str, Any] | None = None
-    ) -> config_entries.ConfigFlowResult:
+    ) -> ConfigFlowResult:
         """Handle room / zone setup."""
         errors: dict[str, str] = {}
 
@@ -276,7 +284,7 @@ class HAHeatingOptionsFlowHandler(config_entries.OptionsFlow):
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
-    ) -> config_entries.ConfigFlowResult:
+    ) -> ConfigFlowResult:
         """Manage entry options."""
         entry_type = self.config_entry.data.get(CONF_ENTRY_TYPE)
 

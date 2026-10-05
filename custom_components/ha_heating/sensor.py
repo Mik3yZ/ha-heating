@@ -8,6 +8,7 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -56,6 +57,12 @@ class HAHeatingSystemSensor(CoordinatorEntity[HAHeatingCoordinator], SensorEntit
         self._key = key
         self._attr_name = name
         self._attr_unique_id = f"ha_heating_hub_{key}"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, "hub")},
+            name="HA Heating Central Hub",
+            manufacturer="HA Heating",
+            model="Central Hub",
+        )
         if unit:
             self._attr_native_unit_of_measurement = unit
         if state_class:

@@ -7,6 +7,7 @@
   "integration_type": "hub",
   "iot_class": "local_push",
   "version": "1.0.1",
-  "dependencies": ["climate"]
+  "dependencies": [],
+  "after_dependencies": ["http"]
 }
 

@@ -19,6 +19,7 @@ CONF_CYCLE_ANCHOR_DATE = "cycle_anchor_date"
 CONF_CYCLE_ENTITY = "cycle_entity"
 
 # Room configuration keys
+CONF_AREA_ID = "area_id"
 CONF_ROOM_NAME = "room_name"
 CONF_ROOM_TEMP_SENSOR = "room_temp_sensor"
 CONF_TRVS = "trvs"

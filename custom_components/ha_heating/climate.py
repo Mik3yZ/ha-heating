@@ -16,6 +16,7 @@ from homeassistant.components.climate import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import ATTR_TEMPERATURE, UnitOfTemperature
 from homeassistant.core import Event, HomeAssistant, callback
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -25,6 +26,7 @@ from .const import (
     CONF_AC_ENTITY,
     CONF_AC_QUIET_END,
     CONF_AC_QUIET_START,
+    CONF_AREA_ID,
     CONF_ENTRY_TYPE,
     CONF_MASTER_BOOST_TEMP,
     CONF_MASTER_CONTROL_MODE,
@@ -113,6 +115,14 @@ class HAHeatingRoomClimate(CoordinatorEntity[HAHeatingCoordinator], ClimateEntit
         self._room_id = entry.entry_id
         self._attr_name = self._config.get(CONF_ROOM_NAME, "Room")
         self._attr_unique_id = f"ha_heating_room_{self._room_id}"
+        area_id = self._config.get(CONF_AREA_ID)
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, self._room_id)},
+            name=self._attr_name,
+            manufacturer="HA Heating",
+            model="Room Thermostat",
+            suggested_area=area_id,
+        )
 
         # TRVs and actuators
         self._trvs: list[str] = self._config.get(CONF_TRVS, [])
