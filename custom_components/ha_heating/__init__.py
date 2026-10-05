@@ -15,6 +15,7 @@ except ImportError:
 
 from .const import CONF_ENTRY_TYPE, DOMAIN, ENTRY_TYPE_HUB, ENTRY_TYPE_ROOM
 from .coordinator import HAHeatingCoordinator
+from .dashboard import async_generate_dashboard, async_setup_dashboard_service
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -22,11 +23,32 @@ PLATFORMS_HUB: list[Platform] = [Platform.SENSOR]
 PLATFORMS_ROOM: list[Platform] = [Platform.CLIMATE]
 
 
+async def _async_register_lovelace_resource(hass: HomeAssistant, url: str) -> None:
+    """Automatically register custom card in Lovelace resources if possible."""
+    try:
+        lovelace = hass.data.get("lovelace")
+        if not lovelace:
+            return
+        resources = getattr(lovelace, "resources", None)
+        if not resources:
+            return
+        if not resources.loaded:
+            await resources.async_load()
+        if not any(res.get("url", "").startswith(url) for res in resources.async_items()):
+            await resources.async_create_item({"res_type": "module", "url": url})
+            _LOGGER.info("Registered Lovelace resource: %s", url)
+    except Exception as err:
+        _LOGGER.debug("Could not auto-register Lovelace resource: %s", err)
+
+
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
-    """Set up the HA Heating component and register static frontend resources."""
+    """Set up the HA Heating component, dashboard service, and static frontend resources."""
     hass.data.setdefault(DOMAIN, {})
 
-    # Register static path for custom card
+    # Register dashboard generator service
+    await async_setup_dashboard_service(hass)
+
+    # Register static path and Lovelace resource for custom card
     frontend_dir = Path(__file__).parent / "frontend"
     card_path = frontend_dir / "ha-heating-card.js"
     if card_path.exists():
@@ -43,6 +65,8 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
             elif hasattr(hass, "http") and hasattr(hass.http, "register_static_path"):
                 hass.http.register_static_path("/ha_heating_card/ha-heating-card.js", str(card_path), False)
             _LOGGER.info("Registered static path for /ha_heating_card/ha-heating-card.js")
+
+            await _async_register_lovelace_resource(hass, "/ha_heating_card/ha-heating-card.js")
         except Exception as err:
             _LOGGER.warning("Could not register frontend card static path: %s", err)
 
@@ -103,6 +127,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await _async_forward_entry_setups(hass, entry, PLATFORMS_ROOM)
 
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))
+
+    # Auto-generate or update dashboard based on active setup
+    hass.async_create_task(async_generate_dashboard(hass))
+
     return True
 
 

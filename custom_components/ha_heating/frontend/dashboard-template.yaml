@@ -1,5 +1,12 @@
-# Voorbeeld Lovelace Dashboard voor HA Heating
-# Kopieer deze configuratie naar een nieuw Dashboard of View in Home Assistant
+# HA Heating - Universeel Lovelace Dashboard Template
+#
+# 💡 TIP VOOR AUTOMATISCHE GENERATIE:
+# HA Heating kan dit dashboard 100% automatisch genereren op basis van jouw kamers en sensoren!
+# 1. Ga naar Ontwikkelaarshulpmiddelen > Acties (Developer Tools > Services).
+# 2. Voer actie uit: 'HA Heating: Genereer Dashboard' (ha_heating.generate_dashboard).
+# 3. Het dashboard wordt direct opgeslagen in '/config/ha_heating_dashboard.yaml' en als notificatie getoond!
+#
+# Of pas de onderstaande configuratie handmatig aan met jouw entiteiten:
 
 title: Slimme Verwarming & Koeling
 icon: mdi:home-thermometer
@@ -13,42 +20,39 @@ views:
       - type: horizontal-stack
         cards:
           - type: entity
-            entity: sensor.ha_heating_actieve_week
+            entity: sensor.ha_heating_central_hub_actieve_week
             name: Actieve Cyclus
             icon: mdi:calendar-sync
           - type: entity
-            entity: sensor.ha_heating_arbitrage_advies
-            name: Voordeligste Bron
+            entity: sensor.ha_heating_central_hub_arbitrage_advies
+            name: Advies Verwarmen
             icon: mdi:scale-balance
           - type: entity
-            entity: sensor.ha_heating_airco_cop
+            entity: sensor.ha_heating_central_hub_airco_cop
             name: Airco COP
             icon: mdi:heat-pump-outline
 
-      # Voorbeeld Kamer 1: Woonkamer (Vloerverwarming / Direct)
-      - type: custom:ha-heating-card
-        entity: climate.woonkamer_heating
-        name: 🛋️ Woonkamer
+      # Optie A: Gebruik de ingebouwde HA Thermostaatkaart (Werkt altijd direct)
+      # Vervang 'climate.jouw_kamer' door de werkelijke klimaatentiteit van je kamer:
+      - type: vertical-stack
+        cards:
+          - type: thermostat
+            entity: climate.woonkamer
+            name: 🛋️ Woonkamer
+            features:
+              - type: climate-preset-modes
+                style: icons
+                preset_modes:
+                  - comfort
+                  - eco
+                  - sleep
+                  - away
+                  - boost
 
-      # Voorbeeld Kamer 2: Slaapkamer (TRVs + Master Boven + Airco)
+      # Optie B: Gebruik de interactieve HA Heating maatwerk kaart
+      # (Werkt automatisch met tabbladen als je 'entity' leeg laat, of geef je kamer op)
       - type: custom:ha-heating-card
-        entity: climate.slaapkamer_heating
-        name: 🛏️ Slaapkamer
-
-      # Voorbeeld Kamer 3: Werkkamer / Kantoor (TRV + Airco)
-      - type: custom:ha-heating-card
-        entity: climate.kantoor_heating
-        name: 💼 Werkkamer
-
-      # Master Thermostaten Overzicht
-      - type: entities
-        title: Centrale Thermostaten & Ketel
-        show_header_toggle: false
-        entities:
-          - entity: climate.thermostaat_boven
-            name: 🌡️ Master Boven (Moes BHT-002)
-          - entity: climate.thermostaat_beneden
-            name: ♨️ Vloerverwarming Beneden
+        name: 🌡️ Kamers Overzicht
 
   - title: Energie & Arbitrage
     path: energie
@@ -56,24 +60,27 @@ views:
     cards:
       - type: vertical-stack
         cards:
+          # Actuele Energietarieven (Pas aan naar jouw energie-sensoren)
           - type: glance
             title: Actuele Energietarieven
             entities:
-              - entity: sensor.gasprijs
-                name: Gasprijs (€/m³)
+              - entity: sensor.ha_heating_central_hub_thermische_kosten_gas
+                name: Gas Thermisch (€/kWh)
                 icon: mdi:fire
-              - entity: sensor.stroomprijs
-                name: Stroomprijs (€/kWh)
-                icon: mdi:flash
-              - entity: sensor.buitentemperatuur
-                name: Buitentemperatuur
-                icon: mdi:thermometer
+              - entity: sensor.ha_heating_central_hub_thermische_kosten_airco
+                name: Airco Thermisch (€/kWh)
+                icon: mdi:lightning-bolt
+              - entity: sensor.ha_heating_central_hub_airco_cop
+                name: Actuele Airco COP
+                icon: mdi:heat-pump-outline
 
+          # Meters: Thermische kosten vergelijking
           - type: horizontal-stack
             cards:
               - type: gauge
-                entity: sensor.ha_heating_thermische_kosten_gas
+                entity: sensor.ha_heating_central_hub_thermische_kosten_gas
                 name: Kosten Gas per kWh Warmte
+                unit: "€/kWh"
                 min: 0.05
                 max: 0.35
                 needle: true
@@ -82,8 +89,9 @@ views:
                   yellow: 0.15
                   red: 0.25
               - type: gauge
-                entity: sensor.ha_heating_thermische_kosten_airco
+                entity: sensor.ha_heating_central_hub_thermische_kosten_airco
                 name: Kosten Airco per kWh Warmte
+                unit: "€/kWh"
                 min: 0.02
                 max: 0.35
                 needle: true
@@ -92,13 +100,13 @@ views:
                   yellow: 0.12
                   red: 0.22
 
+          # Toelichting op de werking van dynamische arbitrage
           - type: markdown
-            title: Arbitrage Toelichting
+            title: Slimme Arbitrage Berekening
             content: >
-              De integratie vergelijkt continu de kosten van 1 kWh thermische warmte:
+              De integratie berekent continu welke warmtebron financieel het voordeligst is:
 
-              - **Gas**: P_gas / 9.0 (rendement HR-ketel verwerkt)
-              - **Airco (Warmtepomp)**: P_stroom / COP(Buitentemperatuur)
+              - **Gasverwarming (CV-ketel)**: `Gasprijs / 9.0 kWh/m³` (rendement HR-ketel verwerkt).
+              - **Airconditioner (Warmtepomp)**: `Stroomprijs / COP(buitentemperatuur)`.
 
-              Wanneer er zonne-energie overschot is (teruglevering), is de warmte van de airco effectief gratis en krijgt de airco altijd voorrang.
-
+              Wanneer er **zonne-energie overschot** is of stroomprijzen negatief zijn, krijgt de airco altijd automatisch voorrang.

@@ -372,5 +372,47 @@ class TestMasterThermostatController(unittest.IsolatedAsyncioTestCase):
         )
 
 
+class TestDashboardGenerator(unittest.TestCase):
+    """Test dashboard YAML generator."""
+
+    def test_generate_dashboard_yaml(self):
+        from custom_components.ha_heating.dashboard import generate_dashboard_yaml
+
+        hub_data = {
+            "gas_price_sensor": "sensor.energy_gas_cost",
+            "electric_price_sensor": "sensor.energy_elec_cost",
+            "outdoor_temp_sensor": "sensor.buiten_temp",
+        }
+        hub_sensors = {
+            "active_week": "sensor.ha_heating_central_hub_actieve_week",
+            "airco_cop": "sensor.ha_heating_central_hub_airco_cop",
+            "thermal_cost_gas": "sensor.ha_heating_central_hub_thermische_kosten_gas",
+            "thermal_cost_electric": "sensor.ha_heating_central_hub_thermische_kosten_airco",
+            "arbitrage_reason": "sensor.ha_heating_central_hub_arbitrage_advies",
+        }
+        rooms = [
+            {
+                "name": "Woonkamer",
+                "climate_id": "climate.woonkamer",
+                "trvs": ["climate.trv_woonkamer_1", "climate.trv_woonkamer_2"],
+                "windows": ["binary_sensor.raam_woonkamer"],
+                "ac_entity": "climate.airco_woonkamer",
+                "master": "climate.thermostaat_boven",
+            }
+        ]
+        masters = ["climate.thermostaat_boven"]
+
+        yaml_str = generate_dashboard_yaml(hub_data, hub_sensors, rooms, masters)
+
+        self.assertIn("title: HA Heating Klimaat", yaml_str)
+        self.assertIn("climate.woonkamer", yaml_str)
+        self.assertIn("climate.trv_woonkamer_1", yaml_str)
+        self.assertIn("binary_sensor.raam_woonkamer", yaml_str)
+        self.assertIn("climate.thermostaat_boven", yaml_str)
+        self.assertIn("sensor.energy_gas_cost", yaml_str)
+        self.assertIn("sensor.energy_elec_cost", yaml_str)
+        self.assertIn("sensor.ha_heating_central_hub_thermische_kosten_gas", yaml_str)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -28,11 +28,11 @@ async def async_setup_entry(
     coordinator: HAHeatingCoordinator = hass.data[DOMAIN]["coordinator"]
 
     entities = [
-        HAHeatingSystemSensor(coordinator, "active_week", "HA Heating Actieve Week", icon="mdi:calendar-week"),
-        HAHeatingSystemSensor(coordinator, "airco_cop", "HA Heating Airco COP", icon="mdi:heat-pump-outline"),
-        HAHeatingSystemSensor(coordinator, "thermal_cost_gas", "HA Heating Thermische Kosten Gas", unit="€/kWh", state_class=SensorStateClass.MEASUREMENT, icon="mdi:fire"),
-        HAHeatingSystemSensor(coordinator, "thermal_cost_electric", "HA Heating Thermische Kosten Airco", unit="€/kWh", state_class=SensorStateClass.MEASUREMENT, icon="mdi:lightning-bolt"),
-        HAHeatingSystemSensor(coordinator, "arbitrage_reason", "HA Heating Arbitrage Advies", icon="mdi:scale-balance"),
+        HAHeatingSystemSensor(coordinator, "active_week", "Actieve Week", icon="mdi:calendar-week"),
+        HAHeatingSystemSensor(coordinator, "airco_cop", "Airco COP", icon="mdi:heat-pump-outline"),
+        HAHeatingSystemSensor(coordinator, "thermal_cost_gas", "Thermische Kosten Gas", unit="€/kWh", state_class=SensorStateClass.MEASUREMENT, icon="mdi:fire"),
+        HAHeatingSystemSensor(coordinator, "thermal_cost_electric", "Thermische Kosten Airco", unit="€/kWh", state_class=SensorStateClass.MEASUREMENT, icon="mdi:lightning-bolt"),
+        HAHeatingSystemSensor(coordinator, "arbitrage_reason", "Arbitrage Advies", icon="mdi:scale-balance"),
     ]
 
     async_add_entities(entities)

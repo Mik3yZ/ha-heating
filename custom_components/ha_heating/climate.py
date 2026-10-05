@@ -115,12 +115,13 @@ class HAHeatingRoomClimate(CoordinatorEntity[HAHeatingCoordinator], ClimateEntit
         self._options = entry.options
 
         self._room_id = entry.entry_id
-        self._attr_name = self._config.get(CONF_ROOM_NAME, "Room")
+        room_name = self._config.get(CONF_ROOM_NAME, "Room")
+        self._attr_name = None
         self._attr_unique_id = f"ha_heating_room_{self._room_id}"
         area_id = self._config.get(CONF_AREA_ID)
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, self._room_id)},
-            name=self._attr_name,
+            name=room_name,
             manufacturer="HA Heating",
             model="Room Thermostat",
             suggested_area=area_id,
