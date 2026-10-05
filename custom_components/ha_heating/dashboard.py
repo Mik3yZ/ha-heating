@@ -51,7 +51,6 @@ def generate_dashboard_yaml(
         "  - title: Kamers & Zones",
         "    path: kamers",
         "    icon: mdi:radiator",
-        "    type: grid",
         "    cards:",
     ]
 

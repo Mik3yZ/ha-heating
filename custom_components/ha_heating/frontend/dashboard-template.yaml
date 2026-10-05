@@ -14,7 +14,6 @@ views:
   - title: Kamers & Zones
     path: kamers
     icon: mdi:radiator
-    type: grid
     cards:
       # Systeem Notificatie / Statusbalk
       - type: horizontal-stack
