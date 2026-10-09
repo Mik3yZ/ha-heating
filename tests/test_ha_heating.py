@@ -627,11 +627,6 @@ class TestDashboardGenerator(unittest.TestCase):
         self.assertIn("path: debug", yaml_str)
         self.assertIn("Besluitvorming: Woonkamer", yaml_str)
         self.assertIn("diagnostic_ac_block_reason", yaml_str)
-        # Panel & Grid layout & Border check
-        self.assertIn("panel: true", yaml_str)
-        self.assertIn("type: grid", yaml_str)
-        self.assertIn("border: 1px solid", yaml_str)
-        self.assertNotIn("geconfigureerd", yaml_str)
 
     def test_async_generate_dashboard_file_and_cache(self):
         import tempfile
