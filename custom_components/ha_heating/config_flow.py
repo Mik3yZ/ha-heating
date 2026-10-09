@@ -37,6 +37,9 @@ from .const import (
     CONF_MASTER_CONTROL_MODE,
     CONF_MASTER_IDLE_TEMP,
     CONF_MASTER_THERMOSTAT,
+    CONF_NOTIFY_PERSISTENT,
+    CONF_NOTIFY_SENSOR_OFFLINE,
+    CONF_NOTIFY_SERVICE,
     CONF_OUTDOOR_TEMP_SENSOR,
     CONF_ROOM_NAME,
     CONF_ROOM_TEMP_SENSOR,
@@ -60,6 +63,9 @@ from .const import (
     DEFAULT_MASTER_BOOST_OFFSET,
     DEFAULT_MASTER_BOOST_TEMP,
     DEFAULT_MASTER_IDLE_TEMP,
+    DEFAULT_NOTIFY_PERSISTENT,
+    DEFAULT_NOTIFY_SENSOR_OFFLINE,
+    DEFAULT_NOTIFY_SERVICE,
     DEFAULT_TEMP_AWAY,
     DEFAULT_TEMP_BOOST,
     DEFAULT_TEMP_COMFORT,
@@ -150,6 +156,15 @@ class HAHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(CONF_CYCLE_ENTITY): selector.EntitySelector(
                     selector.EntitySelectorConfig()
                 ),
+                vol.Optional(
+                    CONF_NOTIFY_SENSOR_OFFLINE, default=DEFAULT_NOTIFY_SENSOR_OFFLINE
+                ): selector.BooleanSelector(),
+                vol.Optional(
+                    CONF_NOTIFY_PERSISTENT, default=DEFAULT_NOTIFY_PERSISTENT
+                ): selector.BooleanSelector(),
+                vol.Optional(
+                    CONF_NOTIFY_SERVICE, default=DEFAULT_NOTIFY_SERVICE
+                ): selector.TextSelector(),
             }
         )
 
@@ -362,6 +377,24 @@ class HAHeatingOptionsFlowHandler(config_entries.OptionsFlow):
                             mode=selector.SelectSelectorMode.DROPDOWN,
                         )
                     ),
+                    vol.Optional(
+                        CONF_NOTIFY_SENSOR_OFFLINE,
+                        default=current_data.get(
+                            CONF_NOTIFY_SENSOR_OFFLINE, DEFAULT_NOTIFY_SENSOR_OFFLINE
+                        ),
+                    ): selector.BooleanSelector(),
+                    vol.Optional(
+                        CONF_NOTIFY_PERSISTENT,
+                        default=current_data.get(
+                            CONF_NOTIFY_PERSISTENT, DEFAULT_NOTIFY_PERSISTENT
+                        ),
+                    ): selector.BooleanSelector(),
+                    vol.Optional(
+                        CONF_NOTIFY_SERVICE,
+                        default=current_data.get(
+                            CONF_NOTIFY_SERVICE, DEFAULT_NOTIFY_SERVICE
+                        ),
+                    ): selector.TextSelector(),
                 }
             )
         else:

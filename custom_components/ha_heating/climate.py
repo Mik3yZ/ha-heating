@@ -115,13 +115,13 @@ class HAHeatingRoomClimate(CoordinatorEntity[HAHeatingCoordinator], ClimateEntit
         self._options = entry.options
 
         self._room_id = entry.entry_id
-        room_name = self._config.get(CONF_ROOM_NAME, "Room")
+        self._room_name = self._config.get(CONF_ROOM_NAME, "Room")
         self._attr_name = None
         self._attr_unique_id = f"ha_heating_room_{self._room_id}"
         area_id = self._config.get(CONF_AREA_ID)
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, self._room_id)},
-            name=room_name,
+            name=self._room_name,
             manufacturer="HA Heating",
             model="Room Thermostat",
             suggested_area=area_id,
@@ -232,7 +232,8 @@ class HAHeatingRoomClimate(CoordinatorEntity[HAHeatingCoordinator], ClimateEntit
                 )
             )
 
-        # Initial evaluation
+        # Initial checks
+        self._check_window_sensors_offline()
         await self._async_evaluate()
 
     @callback
@@ -248,8 +249,25 @@ class HAHeatingRoomClimate(CoordinatorEntity[HAHeatingCoordinator], ClimateEntit
             self._handle_window_sensor_update()
         self.hass.async_create_task(self._async_evaluate())
 
+    def _check_window_sensors_offline(self) -> None:
+        """Check all window sensors for offline/unavailable status."""
+        for w_ent in self._window_sensors:
+            st = self.hass.states.get(w_ent)
+            is_offline = (st is None) or (st.state in ("unavailable", "unknown"))
+            curr_state = st.state if st else "unavailable"
+            self.hass.async_create_task(
+                self.coordinator.async_handle_window_sensor_offline(
+                    room_id=self._room_id,
+                    room_name=self._room_name,
+                    sensor_entity_id=w_ent,
+                    is_offline=is_offline,
+                    current_state=curr_state,
+                )
+            )
+
     def _handle_window_sensor_update(self) -> None:
         """Evaluate open status of window sensors and invoke WindowManager."""
+        self._check_window_sensors_offline()
         any_open = False
         for w_ent in self._window_sensors:
             st = self.hass.states.get(w_ent)
@@ -296,6 +314,21 @@ class HAHeatingRoomClimate(CoordinatorEntity[HAHeatingCoordinator], ClimateEntit
 
         # 1. Update current temperature
         self._attr_current_temperature = self._calc_current_temperature()
+
+        # Check Master Switch (Algemene Aan/Uit knop)
+        if not self.coordinator.system_enabled:
+            self._active_heat_source = HEAT_SOURCE_IDLE
+            self._attr_hvac_action = HVACAction.OFF
+            self._demand_active = False
+            self._reason = "Systeem uitgeschakeld via hoofdschakelaar"
+            await self._set_trvs(DEFAULT_FROST_TEMP)
+            await self._set_ac(HVACMode.OFF)
+            if self._master_controller:
+                await self._master_controller.update_room_demand(
+                    self._room_id, False, now
+                )
+            self.async_write_ha_state()
+            return
 
         # 2. Check window pause
         is_window_paused = self.coordinator.window_manager.get_is_room_paused(

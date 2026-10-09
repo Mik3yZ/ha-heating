@@ -21,7 +21,10 @@
           "calendar_filter": "Kalender filter trefwoord (bijv. Vakantie)",
           "cycle_type": "Type 2-wekelijkse cyclus",
           "cycle_anchor_date": "Ankerdatum (bij 14-daagse cyclus, YYYY-MM-DD)",
-          "cycle_entity": "Sensor of Helper voor weekstatus (optioneel)"
+          "cycle_entity": "Sensor of Helper voor weekstatus (optioneel)",
+          "notify_sensor_offline": "Melding sturen als een raamsensor offline of niet beschikbaar is",
+          "notify_persistent": "Melding tonen in Home Assistant (Notificatiepaneel)",
+          "notify_service": "Mobiele meldingsservice (bijv. notify.notify of notify.mobile_app_telefoon)"
         }
       },
       "room": {

@@ -1,0 +1,233 @@
+# ==============================================================================
+# HA HEATING - MODERN LOVELACE DASHBOARD TEMPLATE
+# ==============================================================================
+# Dit dashboard is gebaseerd op de populaire Mushroom UI kaarten.
+#
+# Benodigde HACS uitbreidingen:
+# 1. Mushroom (lovelace-mushroom)
+#    Installeer via HACS: HACS > Frontend > Mushroom
+# 2. Optioneel: Stack In Card (custom:stack-in-card) & Card Mod (card-mod)
+#
+# Tip: Je kunt dit dashboard ook automatisch op maat laten genereren voor jouw
+# specifieke kamers & sensoren via de Home Assistant actie:
+# "ha_heating.generate_dashboard" (Ontwikkelaarshulpmiddelen > Acties)
+# ==============================================================================
+
+title: HA Heating Klimaat
+icon: mdi:home-thermometer
+views:
+  - title: Kamers & Zones
+    path: kamers
+    icon: mdi:radiator
+    cards:
+      # 1. Centrale Systeem Header (Hoofdschakelaar & Status Chips)
+      - type: custom:mushroom-chips-card
+        alignment: center
+        chips:
+          - type: template
+            entity: switch.ha_heating_central_hub_hoofdschakelaar
+            icon: mdi:power
+            icon_color: "{{ 'green' if is_state('switch.ha_heating_central_hub_hoofdschakelaar', 'on') else 'red' }}"
+            content: "{{ 'Systeem AAN' if is_state('switch.ha_heating_central_hub_hoofdschakelaar', 'on') else 'Systeem UIT' }}"
+            tap_action:
+              action: toggle
+          - type: template
+            entity: sensor.ha_heating_central_hub_actieve_week
+            icon: mdi:calendar-sync
+            icon_color: cyan
+            content: "{{ states('sensor.ha_heating_central_hub_actieve_week') | replace('week_a', 'Week A') | replace('week_b', 'Week B') }}"
+          - type: template
+            entity: sensor.ha_heating_central_hub_arbitrage_advies
+            icon: mdi:scale-balance
+            icon_color: amber
+            content: "{{ states('sensor.ha_heating_central_hub_arbitrage_advies') }}"
+          - type: template
+            entity: sensor.ha_heating_central_hub_airco_cop
+            icon: mdi:heat-pump-outline
+            icon_color: light-blue
+            content: "COP {{ states('sensor.ha_heating_central_hub_airco_cop') }}"
+
+      # --- Ruimte Groep: Begane Grond ---
+      - type: custom:mushroom-title-card
+        title: "Begane Grond"
+        subtitle: "Woonkamer & Keuken"
+
+      # Kamer: Woonkamer
+      - type: vertical-stack
+        cards:
+          - type: custom:mushroom-climate-card
+            entity: climate.woonkamer
+            name: "Woonkamer"
+            icon: mdi:radiator
+            show_temperature_control: true
+            collapsible_controls: false
+            hvac_modes:
+              - heat
+              - "off"
+              - cool
+
+          # Snelle Preset Knoppen
+          - type: custom:mushroom-chips-card
+            alignment: center
+            chips:
+              - type: template
+                icon: mdi:fire
+                icon_color: "{{ 'red' if is_state_attr('climate.woonkamer', 'preset_mode', 'comfort') else 'grey' }}"
+                content: "Comfort"
+                tap_action:
+                  action: call-service
+                  service: climate.set_preset_mode
+                  target:
+                    entity_id: climate.woonkamer
+                  data:
+                    preset_mode: comfort
+              - type: template
+                icon: mdi:leaf
+                icon_color: "{{ 'green' if is_state_attr('climate.woonkamer', 'preset_mode', 'eco') else 'grey' }}"
+                content: "Eco"
+                tap_action:
+                  action: call-service
+                  service: climate.set_preset_mode
+                  target:
+                    entity_id: climate.woonkamer
+                  data:
+                    preset_mode: eco
+              - type: template
+                icon: mdi:bed
+                icon_color: "{{ 'purple' if is_state_attr('climate.woonkamer', 'preset_mode', 'sleep') else 'grey' }}"
+                content: "Slaap"
+                tap_action:
+                  action: call-service
+                  service: climate.set_preset_mode
+                  target:
+                    entity_id: climate.woonkamer
+                  data:
+                    preset_mode: sleep
+              - type: template
+                icon: mdi:home-export-outline
+                icon_color: "{{ 'blue' if is_state_attr('climate.woonkamer', 'preset_mode', 'away') else 'grey' }}"
+                content: "Afwezig"
+                tap_action:
+                  action: call-service
+                  service: climate.set_preset_mode
+                  target:
+                    entity_id: climate.woonkamer
+                  data:
+                    preset_mode: away
+              - type: template
+                icon: mdi:rocket-launch
+                icon_color: "{{ 'deep-orange' if is_state_attr('climate.woonkamer', 'preset_mode', 'boost') else 'grey' }}"
+                content: "Boost"
+                tap_action:
+                  action: call-service
+                  service: climate.set_preset_mode
+                  target:
+                    entity_id: climate.woonkamer
+                  data:
+                    preset_mode: boost
+
+          # Status & Componenten
+          - type: custom:mushroom-chips-card
+            alignment: start
+            chips:
+              - type: template
+                icon: "{{ 'mdi:fire' if is_state_attr('climate.woonkamer', 'active_heat_source', 'gas') else ('mdi:snowflake' if is_state_attr('climate.woonkamer', 'active_heat_source', 'ac_cool') else ('mdi:heat-pump-outline' if is_state_attr('climate.woonkamer', 'active_heat_source', 'ac_heat') else ('mdi:window-open-variant' if is_state_attr('climate.woonkamer', 'active_heat_source', 'window_open') else 'mdi:power-sleep'))) }}"
+                icon_color: "{{ 'red' if is_state_attr('climate.woonkamer', 'active_heat_source', 'gas') else ('blue' if is_state_attr('climate.woonkamer', 'active_heat_source', 'ac_cool') else ('orange' if is_state_attr('climate.woonkamer', 'active_heat_source', 'ac_heat') else 'grey')) }}"
+                content: "{{ state_attr('climate.woonkamer', 'resolution_reason') | default('Rust') }}"
+              - type: template
+                entity: binary_sensor.raam_woonkamer
+                icon: "{{ 'mdi:window-open-variant' if is_state('binary_sensor.raam_woonkamer', 'on') else ('mdi:alert-circle' if states('binary_sensor.raam_woonkamer') in ['unavailable', 'unknown'] else 'mdi:window-closed-variant') }}"
+                icon_color: "{{ 'amber' if is_state('binary_sensor.raam_woonkamer', 'on') else ('red' if states('binary_sensor.raam_woonkamer') in ['unavailable', 'unknown'] else 'green') }}"
+                content: "{{ 'Raam open' if is_state('binary_sensor.raam_woonkamer', 'on') else ('Offline!' if states('binary_sensor.raam_woonkamer') in ['unavailable', 'unknown'] else 'Dicht') }}"
+              - type: entity
+                entity: climate.trv_woonkamer_1
+                name: "Kraan 1"
+                icon: mdi:radiator
+              - type: entity
+                entity: climate.airco_woonkamer
+                name: "Airco"
+                icon: mdi:air-conditioner
+
+      # Master Thermostaten (Ketelkoppeling)
+      - type: custom:mushroom-title-card
+        title: "Centrale Verwarming"
+        subtitle: "Master Thermostaat (Vraaggestuurd)"
+      - type: vertical-stack
+        cards:
+          - type: custom:mushroom-climate-card
+            entity: climate.thermostaat_boven
+            name: "Master Thermostaat"
+            icon: mdi:water-boiler
+            show_temperature_control: true
+            collapsible_controls: false
+
+  # Tab 2: Energie & Arbitrage
+  - title: Energie & Arbitrage
+    path: energie
+    icon: mdi:lightning-bolt
+    cards:
+      - type: custom:mushroom-title-card
+        title: "Energie & Arbitrage"
+        subtitle: "Realtime kostenvergelijking tussen gas en airco warmtepomp"
+
+      # Actuele Tarieven & Sensoren
+      - type: horizontal-stack
+        cards:
+          - type: custom:mushroom-entity-card
+            entity: sensor.gasprijs
+            name: "Gasprijs"
+            icon: mdi:fire
+            icon_color: red
+          - type: custom:mushroom-entity-card
+            entity: sensor.stroomprijs
+            name: "Stroomprijs"
+            icon: mdi:lightning-bolt
+            icon_color: amber
+          - type: custom:mushroom-entity-card
+            entity: sensor.buitentemperatuur
+            name: "Buitentemp"
+            icon: mdi:thermometer
+            icon_color: blue
+          - type: custom:mushroom-entity-card
+            entity: sensor.zonne_overschot
+            name: "Zonne-overschot"
+            icon: mdi:solar-power
+            icon_color: green
+
+      # Kosten per kWh Thermische Warmte
+      - type: horizontal-stack
+        cards:
+          - type: gauge
+            entity: sensor.ha_heating_central_hub_thermische_kosten_gas
+            name: "Kosten Gas per kWh Warmte"
+            unit: "€/kWh"
+            min: 0.05
+            max: 0.35
+            needle: true
+            severity:
+              green: 0.05
+              yellow: 0.15
+              red: 0.25
+          - type: gauge
+            entity: sensor.ha_heating_central_hub_thermische_kosten_airco
+            name: "Kosten Airco per kWh Warmte"
+            unit: "€/kWh"
+            min: 0.02
+            max: 0.35
+            needle: true
+            severity:
+              green: 0.02
+              yellow: 0.12
+              red: 0.22
+
+      # Toelichting Arbitrage Formule
+      - type: markdown
+        title: "Slimme Arbitrage Berekening"
+        content: |
+          De integratie berekent continu welke warmtebron financieel het voordeligst is:
+
+          * **Gasverwarming (CV-ketel)**: `P_gas / 9.0 kWh/m³`
+          * **Airconditioner / Warmtepomp**: `P_stroom / COP(buitentemperatuur)`
+
+          Zodra er **zonne-energie overschot** is of stroomprijzen negatief zijn, krijgt de airco automatisch voorrang.
+

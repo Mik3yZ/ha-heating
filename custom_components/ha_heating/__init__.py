@@ -19,7 +19,7 @@ from .dashboard import async_generate_dashboard, async_setup_dashboard_service
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS_HUB: list[Platform] = [Platform.SENSOR]
+PLATFORMS_HUB: list[Platform] = [Platform.SENSOR, Platform.SWITCH]
 PLATFORMS_ROOM: list[Platform] = [Platform.CLIMATE]
 
 

@@ -17,6 +17,15 @@ CONF_CALENDAR_FILTER = "calendar_filter"
 CONF_CYCLE_TYPE = "cycle_type"
 CONF_CYCLE_ANCHOR_DATE = "cycle_anchor_date"
 CONF_CYCLE_ENTITY = "cycle_entity"
+CONF_NOTIFY_SENSOR_OFFLINE = "notify_sensor_offline"
+CONF_NOTIFY_SERVICE = "notify_service"
+CONF_NOTIFY_PERSISTENT = "notify_persistent"
+CONF_SYSTEM_ENABLED = "system_enabled"
+
+DEFAULT_NOTIFY_SENSOR_OFFLINE = True
+DEFAULT_NOTIFY_SERVICE = "notify.notify"
+DEFAULT_NOTIFY_PERSISTENT = True
+DEFAULT_SYSTEM_ENABLED = True
 
 # Room configuration keys
 CONF_AREA_ID = "area_id"

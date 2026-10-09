@@ -3,6 +3,18 @@ from unittest.mock import MagicMock
 
 # Mock homeassistant modules so tests run in environments without HA core installed
 if "homeassistant" not in sys.modules:
+    class MockDUC:
+        def __init__(self, *args, **kwargs): pass
+        def __class_getitem__(cls, item): return cls
+        def async_update_listeners(self): pass
+
+    class MockCE:
+        def __init__(self, coordinator): self.coordinator = coordinator
+        def __class_getitem__(cls, item): return cls
+        def async_write_ha_state(self): pass
+
+    class MockSE: pass
+
     ha_mock = MagicMock()
     sys.modules["homeassistant"] = ha_mock
     sys.modules["homeassistant.config_entries"] = MagicMock()
@@ -11,9 +23,22 @@ if "homeassistant" not in sys.modules:
     sys.modules["homeassistant.components"] = MagicMock()
     sys.modules["homeassistant.components.http"] = MagicMock()
     sys.modules["homeassistant.components.climate"] = MagicMock()
+
+    sw_mod = MagicMock()
+    sw_mod.SwitchEntity = MockSE
+    sys.modules["homeassistant.components.switch"] = sw_mod
+
     sys.modules["homeassistant.helpers"] = MagicMock()
-    sys.modules["homeassistant.helpers.update_coordinator"] = MagicMock()
     sys.modules["homeassistant.helpers.event"] = MagicMock()
+    sys.modules["homeassistant.helpers.device_registry"] = MagicMock()
+    sys.modules["homeassistant.helpers.area_registry"] = MagicMock()
+    sys.modules["homeassistant.helpers.entity_registry"] = MagicMock()
+    sys.modules["homeassistant.helpers.entity_platform"] = MagicMock()
+
+    duc_mod = MagicMock()
+    duc_mod.DataUpdateCoordinator = MockDUC
+    duc_mod.CoordinatorEntity = MockCE
+    sys.modules["homeassistant.helpers.update_coordinator"] = duc_mod
 
 from datetime import datetime, date
 import unittest
@@ -372,6 +397,132 @@ class TestMasterThermostatController(unittest.IsolatedAsyncioTestCase):
         )
 
 
+class TestMasterSwitchAndCoordinator(unittest.IsolatedAsyncioTestCase):
+    """Test Master Switch toggle and coordinator system_enabled logic."""
+
+    async def test_master_switch_turn_off_and_on(self):
+        from unittest.mock import AsyncMock
+        from custom_components.ha_heating.coordinator import HAHeatingCoordinator
+        from custom_components.ha_heating.switch import HAHeatingMasterSwitch
+
+        hass_mock = MagicMock()
+        hass_mock.services.async_call = AsyncMock()
+
+        coord = HAHeatingCoordinator(hass_mock, {})
+        self.assertTrue(coord.system_enabled)
+
+        # Attach a mock master controller with active demand
+        mock_master = MagicMock()
+        mock_master._active_room_demands = {"room_1"}
+        mock_master.update_room_demand = AsyncMock()
+        coord.master_controllers["climate.ketel"] = mock_master
+
+        switch = HAHeatingMasterSwitch(coord)
+        self.assertTrue(switch.is_on)
+
+        # Turn OFF
+        await switch.async_turn_off()
+        self.assertFalse(switch.is_on)
+        self.assertFalse(coord.system_enabled)
+        # Should clear active demand on master controller immediately
+        mock_master.update_room_demand.assert_called_once()
+        call_args = mock_master.update_room_demand.call_args[0]
+        self.assertEqual(call_args[0], "room_1")
+        self.assertFalse(call_args[1])  # Demand False
+
+        # Turn back ON
+        await switch.async_turn_on()
+        self.assertTrue(switch.is_on)
+        self.assertTrue(coord.system_enabled)
+
+
+class TestWindowSensorOfflineNotification(unittest.IsolatedAsyncioTestCase):
+    """Test window sensor offline notifications (persistent & mobile notify)."""
+
+    async def test_offline_notification_and_recovery(self):
+        from unittest.mock import AsyncMock
+        from custom_components.ha_heating.coordinator import HAHeatingCoordinator
+        from custom_components.ha_heating.const import (
+            CONF_NOTIFY_PERSISTENT,
+            CONF_NOTIFY_SENSOR_OFFLINE,
+            CONF_NOTIFY_SERVICE,
+        )
+
+        hass_mock = MagicMock()
+        hass_mock.services.async_call = AsyncMock()
+
+        hub_config = {
+            CONF_NOTIFY_SENSOR_OFFLINE: True,
+            CONF_NOTIFY_PERSISTENT: True,
+            CONF_NOTIFY_SERVICE: "notify.mobile_app_telefoon",
+        }
+        coord = HAHeatingCoordinator(hass_mock, hub_config)
+
+        # 1. Sensor becomes offline
+        await coord.async_handle_window_sensor_offline(
+            room_id="slaapkamer",
+            room_name="Slaapkamer",
+            sensor_entity_id="binary_sensor.raam_slaapkamer",
+            is_offline=True,
+            current_state="unavailable",
+        )
+
+        # Expect persistent_notification.create and notify.mobile_app_telefoon
+        self.assertIn("binary_sensor.raam_slaapkamer", coord._offline_sensors)
+        self.assertEqual(hass_mock.services.async_call.call_count, 2)
+
+        calls = [c[0] for c in hass_mock.services.async_call.call_args_list]
+        self.assertEqual(calls[0][0], "persistent_notification")
+        self.assertEqual(calls[0][1], "create")
+        self.assertEqual(calls[1][0], "notify")
+        self.assertEqual(calls[1][1], "mobile_app_telefoon")
+
+        # 2. Duplicate offline call should NOT send duplicate notifications
+        await coord.async_handle_window_sensor_offline(
+            room_id="slaapkamer",
+            room_name="Slaapkamer",
+            sensor_entity_id="binary_sensor.raam_slaapkamer",
+            is_offline=True,
+            current_state="unavailable",
+        )
+        self.assertEqual(hass_mock.services.async_call.call_count, 2)
+
+        # 3. Sensor recovers and is back online
+        await coord.async_handle_window_sensor_offline(
+            room_id="slaapkamer",
+            room_name="Slaapkamer",
+            sensor_entity_id="binary_sensor.raam_slaapkamer",
+            is_offline=False,
+            current_state="off",
+        )
+        self.assertNotIn("binary_sensor.raam_slaapkamer", coord._offline_sensors)
+        self.assertEqual(hass_mock.services.async_call.call_count, 3)
+        last_call = hass_mock.services.async_call.call_args_list[-1][0]
+        self.assertEqual(last_call[0], "persistent_notification")
+        self.assertEqual(last_call[1], "dismiss")
+
+    async def test_disabled_notifications(self):
+        from unittest.mock import AsyncMock
+        from custom_components.ha_heating.coordinator import HAHeatingCoordinator
+        from custom_components.ha_heating.const import CONF_NOTIFY_SENSOR_OFFLINE
+
+        hass_mock = MagicMock()
+        hass_mock.services.async_call = AsyncMock()
+
+        hub_config = {CONF_NOTIFY_SENSOR_OFFLINE: False}
+        coord = HAHeatingCoordinator(hass_mock, hub_config)
+
+        await coord.async_handle_window_sensor_offline(
+            room_id="badkamer",
+            room_name="Badkamer",
+            sensor_entity_id="binary_sensor.raam_badkamer",
+            is_offline=True,
+            current_state="unavailable",
+        )
+        self.assertEqual(hass_mock.services.async_call.call_count, 0)
+        self.assertNotIn("binary_sensor.raam_badkamer", coord._offline_sensors)
+
+
 class TestDashboardGenerator(unittest.TestCase):
     """Test dashboard YAML generator."""
 
@@ -384,6 +535,7 @@ class TestDashboardGenerator(unittest.TestCase):
             "outdoor_temp_sensor": "sensor.buiten_temp",
         }
         hub_sensors = {
+            "master_switch": "switch.ha_heating_central_hub_hoofdschakelaar",
             "active_week": "sensor.ha_heating_central_hub_actieve_week",
             "airco_cop": "sensor.ha_heating_central_hub_airco_cop",
             "thermal_cost_gas": "sensor.ha_heating_central_hub_thermische_kosten_gas",
@@ -393,6 +545,7 @@ class TestDashboardGenerator(unittest.TestCase):
         rooms = [
             {
                 "name": "Woonkamer",
+                "area_name": "Begane Grond",
                 "climate_id": "climate.woonkamer",
                 "trvs": ["climate.trv_woonkamer_1", "climate.trv_woonkamer_2"],
                 "windows": ["binary_sensor.raam_woonkamer"],
@@ -405,10 +558,26 @@ class TestDashboardGenerator(unittest.TestCase):
         yaml_str = generate_dashboard_yaml(hub_data, hub_sensors, rooms, masters)
 
         self.assertIn("title: HA Heating Klimaat", yaml_str)
+        # Modern Mushroom cards check
+        self.assertIn("custom:mushroom-chips-card", yaml_str)
+        self.assertIn("custom:mushroom-climate-card", yaml_str)
+        self.assertIn("custom:mushroom-title-card", yaml_str)
+        # Master switch chip check
+        self.assertIn("switch.ha_heating_central_hub_hoofdschakelaar", yaml_str)
+        # Area grouping check
+        self.assertIn("Begane Grond", yaml_str)
+        # Room entities check
         self.assertIn("climate.woonkamer", yaml_str)
         self.assertIn("climate.trv_woonkamer_1", yaml_str)
         self.assertIn("binary_sensor.raam_woonkamer", yaml_str)
         self.assertIn("climate.thermostaat_boven", yaml_str)
+        # Presets check
+        self.assertIn("comfort", yaml_str)
+        self.assertIn("eco", yaml_str)
+        self.assertIn("sleep", yaml_str)
+        self.assertIn("away", yaml_str)
+        self.assertIn("boost", yaml_str)
+        # Energy & Arbitrage check
         self.assertIn("sensor.energy_gas_cost", yaml_str)
         self.assertIn("sensor.energy_elec_cost", yaml_str)
         self.assertIn("sensor.ha_heating_central_hub_thermische_kosten_gas", yaml_str)
@@ -416,3 +585,4 @@ class TestDashboardGenerator(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

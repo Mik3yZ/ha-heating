@@ -21,12 +21,20 @@ from .const import (
     CONF_CYCLE_TYPE,
     CONF_ELECTRIC_PRICE_SENSOR,
     CONF_GAS_PRICE_SENSOR,
+    CONF_NOTIFY_PERSISTENT,
+    CONF_NOTIFY_SENSOR_OFFLINE,
+    CONF_NOTIFY_SERVICE,
     CONF_OUTDOOR_TEMP_SENSOR,
     CONF_SOLAR_EXPORT_SENSOR,
+    CONF_SYSTEM_ENABLED,
     CONF_VACATION_CALENDAR,
     CYCLE_ISO_EVEN_ODD,
     DEFAULT_MASTER_BOOST_OFFSET,
     DEFAULT_MASTER_IDLE_TEMP,
+    DEFAULT_NOTIFY_PERSISTENT,
+    DEFAULT_NOTIFY_SENSOR_OFFLINE,
+    DEFAULT_NOTIFY_SERVICE,
+    DEFAULT_SYSTEM_ENABLED,
     DOMAIN,
 )
 from .energy_arbitrage import EnergyArbitrage
@@ -65,6 +73,7 @@ class HAHeatingCoordinator(DataUpdateCoordinator[dict]):
             if entry is not None:
                 self.config_entry = entry
 
+        self.hass = hass
         self.hub_config = hub_config
 
         # Core logic engines
@@ -76,11 +85,124 @@ class HAHeatingCoordinator(DataUpdateCoordinator[dict]):
         )
         self.window_manager = WindowManager()
 
+        # Master system switch state (persisted or default True)
+        self.system_enabled: bool = bool(
+            hub_config.get(CONF_SYSTEM_ENABLED, DEFAULT_SYSTEM_ENABLED)
+        )
+        self._offline_sensors: set[str] = set()
+
         # Master controllers indexed by master entity_id
         self.master_controllers: dict[str, MasterThermostatController] = {}
 
         # Tracking listeners
         self._unsub_listeners: list[CALLBACK_TYPE] = []
+
+    async def async_set_system_enabled(self, enabled: bool) -> None:
+        """Turn entire HA Heating system on or off."""
+        if self.system_enabled == enabled:
+            return
+        self.system_enabled = enabled
+        self.hub_config[CONF_SYSTEM_ENABLED] = enabled
+        _LOGGER.info("HA Heating Master Switch changed to: %s", "AAN" if enabled else "UIT")
+
+        if not enabled:
+            # Clear all calls for heat across all master thermostats immediately
+            now = datetime.now()
+            for ctrl in self.master_controllers.values():
+                for room_id in list(ctrl._active_room_demands):
+                    await ctrl.update_room_demand(room_id, False, now)
+
+        self.async_update_listeners()
+
+    async def async_handle_window_sensor_offline(
+        self,
+        room_id: str,
+        room_name: str,
+        sensor_entity_id: str,
+        is_offline: bool,
+        current_state: str | None = None,
+    ) -> None:
+        """Send or dismiss notifications when a window sensor is offline/unavailable."""
+        if not self.hub_config.get(CONF_NOTIFY_SENSOR_OFFLINE, DEFAULT_NOTIFY_SENSOR_OFFLINE):
+            return
+
+        notification_id = f"ha_heating_sensor_offline_{sensor_entity_id.replace('.', '_')}"
+
+        if is_offline:
+            if sensor_entity_id in self._offline_sensors:
+                return  # Already notified, avoid spam
+            self._offline_sensors.add(sensor_entity_id)
+
+            msg = (
+                f"Raamsensor `{sensor_entity_id}` in kamer **{room_name}** is offline of niet beschikbaar "
+                f"(status: `{current_state}`). Controleer de batterij of de netwerkverbinding."
+            )
+            title = f"⚠️ Raamsensor offline ({room_name})"
+
+            # 1. Persistent notification in Home Assistant
+            if self.hub_config.get(CONF_NOTIFY_PERSISTENT, DEFAULT_NOTIFY_PERSISTENT):
+                try:
+                    await self.hass.services.async_call(
+                        "persistent_notification",
+                        "create",
+                        {
+                            "title": title,
+                            "message": msg,
+                            "notification_id": notification_id,
+                        },
+                        blocking=False,
+                    )
+                except Exception as err:
+                    _LOGGER.debug("Could not create persistent notification: %s", err)
+
+            # 2. Mobile / configurable notify service
+            notify_svc = self.hub_config.get(CONF_NOTIFY_SERVICE, DEFAULT_NOTIFY_SERVICE)
+            if notify_svc:
+                domain, service = (
+                    notify_svc.split(".", 1) if "." in notify_svc else ("notify", notify_svc)
+                )
+                try:
+                    await self.hass.services.async_call(
+                        domain,
+                        service,
+                        {
+                            "title": title,
+                            "message": msg,
+                            "data": {
+                                "tag": notification_id,
+                                "channel": "HA Heating Waarschuwingen",
+                                "importance": "high",
+                            },
+                        },
+                        blocking=False,
+                    )
+                    _LOGGER.info(
+                        "Sent offline sensor notification via %s for %s",
+                        notify_svc,
+                        sensor_entity_id,
+                    )
+                except Exception as err:
+                    _LOGGER.warning(
+                        "Failed to send mobile notification via %s: %s",
+                        notify_svc,
+                        err,
+                    )
+        else:
+            if sensor_entity_id not in self._offline_sensors:
+                return
+            self._offline_sensors.remove(sensor_entity_id)
+
+            # Dismiss persistent notification upon recovery
+            if self.hub_config.get(CONF_NOTIFY_PERSISTENT, DEFAULT_NOTIFY_PERSISTENT):
+                try:
+                    await self.hass.services.async_call(
+                        "persistent_notification",
+                        "dismiss",
+                        {"notification_id": notification_id},
+                        blocking=False,
+                    )
+                except Exception as err:
+                    _LOGGER.debug("Could not dismiss persistent notification: %s", err)
 
     def get_or_create_master_controller(
         self,

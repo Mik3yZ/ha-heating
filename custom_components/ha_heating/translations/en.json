@@ -21,7 +21,10 @@
           "calendar_filter": "Calendar filter keyword (e.g. Vacation)",
           "cycle_type": "2-week cycle type",
           "cycle_anchor_date": "Anchor date (for 14-day cycle, YYYY-MM-DD)",
-          "cycle_entity": "Sensor or helper for week cycle (optional)"
+          "cycle_entity": "Sensor or helper for week cycle (optional)",
+          "notify_sensor_offline": "Send notification if a window sensor goes offline or unavailable",
+          "notify_persistent": "Show notification in Home Assistant notifications panel",
+          "notify_service": "Mobile notification service (e.g. notify.notify or notify.mobile_app_phone)"
         }
       },
       "room": {
