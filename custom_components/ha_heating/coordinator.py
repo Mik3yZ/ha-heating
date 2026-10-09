@@ -74,20 +74,20 @@ class HAHeatingCoordinator(DataUpdateCoordinator[dict]):
                 self.config_entry = entry
 
         self.hass = hass
-        self.hub_config = hub_config
+        self.hub_config = dict(hub_config)
 
         # Core logic engines
         self.arbitrage = EnergyArbitrage()
         self.scheduler = HeatingScheduler(
-            cycle_type=hub_config.get(CONF_CYCLE_TYPE, CYCLE_ISO_EVEN_ODD),
-            cycle_anchor_date_str=hub_config.get(CONF_CYCLE_ANCHOR_DATE),
-            calendar_filter=hub_config.get(CONF_CALENDAR_FILTER),
+            cycle_type=self.hub_config.get(CONF_CYCLE_TYPE, CYCLE_ISO_EVEN_ODD),
+            cycle_anchor_date_str=self.hub_config.get(CONF_CYCLE_ANCHOR_DATE),
+            calendar_filter=self.hub_config.get(CONF_CALENDAR_FILTER),
         )
         self.window_manager = WindowManager()
 
         # Master system switch state (persisted or default True)
         self.system_enabled: bool = bool(
-            hub_config.get(CONF_SYSTEM_ENABLED, DEFAULT_SYSTEM_ENABLED)
+            self.hub_config.get(CONF_SYSTEM_ENABLED, DEFAULT_SYSTEM_ENABLED)
         )
         self._offline_sensors: set[str] = set()
 
@@ -109,7 +109,7 @@ class HAHeatingCoordinator(DataUpdateCoordinator[dict]):
             # Clear all calls for heat across all master thermostats immediately
             now = datetime.now()
             for ctrl in self.master_controllers.values():
-                for room_id in list(ctrl._active_room_demands):
+                for room_id in list(ctrl.active_demanding_rooms):
                     await ctrl.update_room_demand(room_id, False, now)
 
         self.async_update_listeners()

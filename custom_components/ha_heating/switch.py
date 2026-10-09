@@ -11,6 +11,13 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+try:
+    from homeassistant.helpers.restore_state import RestoreEntity
+except ImportError:
+    class RestoreEntity:
+        """Fallback RestoreEntity."""
+        async def async_get_last_state(self):
+            return None
 
 from .const import CONF_ENTRY_TYPE, DOMAIN, ENTRY_TYPE_HUB
 from .coordinator import HAHeatingCoordinator
@@ -31,7 +38,7 @@ async def async_setup_entry(
     async_add_entities([HAHeatingMasterSwitch(coordinator)])
 
 
-class HAHeatingMasterSwitch(CoordinatorEntity[HAHeatingCoordinator], SwitchEntity):
+class HAHeatingMasterSwitch(CoordinatorEntity[HAHeatingCoordinator], RestoreEntity, SwitchEntity):
     """Master switch to enable or disable the entire HA Heating system."""
 
     _attr_has_entity_name = True
@@ -49,6 +56,16 @@ class HAHeatingMasterSwitch(CoordinatorEntity[HAHeatingCoordinator], SwitchEntit
             model="Central Hub",
         )
 
+    async def async_added_to_hass(self) -> None:
+        """Restore switch state across restarts."""
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state is not None:
+            if last_state.state == "off":
+                await self.coordinator.async_set_system_enabled(False)
+            elif last_state.state == "on":
+                await self.coordinator.async_set_system_enabled(True)
+
     @property
     def is_on(self) -> bool:
         """Return True if HA Heating is enabled."""
@@ -63,4 +80,3 @@ class HAHeatingMasterSwitch(CoordinatorEntity[HAHeatingCoordinator], SwitchEntit
         """Turn off HA Heating."""
         await self.coordinator.async_set_system_enabled(False)
         self.async_write_ha_state()
-

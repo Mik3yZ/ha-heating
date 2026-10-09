@@ -20,6 +20,13 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+try:
+    from homeassistant.helpers.restore_state import RestoreEntity
+except ImportError:
+    class RestoreEntity:
+        """Fallback RestoreEntity."""
+        async def async_get_last_state(self):
+            return None
 
 from .const import (
     CONF_AC_ENABLE_COOLING,
@@ -95,7 +102,7 @@ async def async_setup_entry(
     async_add_entities([HAHeatingRoomClimate(hass, entry, coordinator)])
 
 
-class HAHeatingRoomClimate(CoordinatorEntity[HAHeatingCoordinator], ClimateEntity):
+class HAHeatingRoomClimate(CoordinatorEntity[HAHeatingCoordinator], RestoreEntity, ClimateEntity):
     """Virtual climate entity representing a room zone."""
 
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
@@ -209,11 +216,51 @@ class HAHeatingRoomClimate(CoordinatorEntity[HAHeatingCoordinator], ClimateEntit
 
         self._active_heat_source = HEAT_SOURCE_IDLE
         self._reason = "Initialized"
+        self._demand_reason = "Initialized"
+        self._ac_block_reason = "Initialized"
+        self._action_summary = "Initialized"
         self._demand_active = False
 
     async def async_added_to_hass(self) -> None:
-        """Register listeners for external entities."""
+        """Register listeners for external entities and restore previous state."""
         await super().async_added_to_hass()
+
+        # Restore previous state after reboot
+        last_state = await self.async_get_last_state()
+        if last_state:
+            last_preset = last_state.attributes.get("preset_mode")
+            if last_preset in self._attr_preset_modes:
+                self._attr_preset_mode = last_preset
+                _LOGGER.info(
+                    "Room '%s': Restored preset_mode to '%s'",
+                    self._room_name,
+                    last_preset,
+                )
+
+            if last_state.state in self._attr_hvac_modes:
+                self._attr_hvac_mode = HVACMode(last_state.state)
+                _LOGGER.info(
+                    "Room '%s': Restored hvac_mode to '%s'",
+                    self._room_name,
+                    self._attr_hvac_mode,
+                )
+
+            override_temp = last_state.attributes.get("manual_override_temp")
+            override_until = last_state.attributes.get("manual_override_until")
+            if override_temp is not None and override_until:
+                try:
+                    dt_until = datetime.fromisoformat(override_until)
+                    if datetime.now() < dt_until:
+                        self._manual_override_temp = float(override_temp)
+                        self._manual_override_until = dt_until
+                        _LOGGER.info(
+                            "Room '%s': Restored active manual override %.1f°C until %s",
+                            self._room_name,
+                            self._manual_override_temp,
+                            dt_until,
+                        )
+                except Exception:
+                    pass
 
         watched = set(self._trvs)
         if self._room_temp_sensor:
@@ -321,6 +368,9 @@ class HAHeatingRoomClimate(CoordinatorEntity[HAHeatingCoordinator], ClimateEntit
             self._attr_hvac_action = HVACAction.OFF
             self._demand_active = False
             self._reason = "Systeem uitgeschakeld via hoofdschakelaar"
+            self._demand_reason = "Systeem uitgeschakeld via hoofdschakelaar"
+            self._ac_block_reason = "Hoofdschakelaar staat UIT"
+            self._action_summary = "Hoofdschakelaar staat UIT. Alle verwarming/koeling gestopt."
             await self._set_trvs(DEFAULT_FROST_TEMP)
             await self._set_ac(HVACMode.OFF)
             if self._master_controller:
@@ -384,38 +434,84 @@ class HAHeatingRoomClimate(CoordinatorEntity[HAHeatingCoordinator], ClimateEntit
                 ):
                     needs_cool = True
 
-        # 5. Check quiet hours for AC
+        # Formulate demand reason
+        if self._attr_hvac_mode == HVACMode.OFF:
+            self._demand_reason = "Klimaat staat op UIT (geen verwarming)"
+        elif is_window_paused:
+            self._demand_reason = "Gepauzeerd: raam staat open"
+        elif self._attr_current_temperature is None:
+            self._demand_reason = "Geen actuele temperatuurmeting beschikbaar"
+        elif needs_heat:
+            diff = round(self._attr_target_temperature - self._attr_current_temperature, 1)
+            self._demand_reason = (
+                f"Warmtevraag actief: actueel {self._attr_current_temperature}°C < doel {self._attr_target_temperature}°C "
+                f"(verschil {diff}°C >= drempel {DEFAULT_HYSTERESIS_ON}°C)"
+            )
+        elif needs_cool:
+            diff = round(self._attr_current_temperature - self._attr_target_temperature, 1)
+            self._demand_reason = (
+                f"Koelvraag actief: actueel {self._attr_current_temperature}°C > doel {self._attr_target_temperature}°C "
+                f"(verschil {diff}°C >= deadband {DEFAULT_AC_COOL_DEADBAND}°C)"
+            )
+        else:
+            diff = round(abs(self._attr_target_temperature - self._attr_current_temperature), 1)
+            self._demand_reason = (
+                f"Temperatuur bereikt: actueel {self._attr_current_temperature}°C "
+                f"(doel {self._attr_target_temperature}°C, binnen hysterese)"
+            )
+
+        # 5. Check quiet hours and AC availability
+        quiet_start = self._config.get(CONF_AC_QUIET_START, "22:00")
+        quiet_end = self._config.get(CONF_AC_QUIET_END, "07:00")
         is_quiet = self.coordinator.arbitrage.is_in_quiet_hours(
-            now,
-            self._config.get(CONF_AC_QUIET_START),
-            self._config.get(CONF_AC_QUIET_END),
+            now, quiet_start, quiet_end
         )
-        # Slaap preset blocks AC heating as well
-        if self._attr_preset_mode == PRESET_SLEEP:
+        is_sleep = (self._attr_preset_mode == PRESET_SLEEP)
+        if is_sleep:
             is_quiet = True
 
-        # 6. Arbitrage decision: AC vs Gas
-        use_ac_decision = False
-        if needs_heat and self._ac_entity and not is_quiet:
-            use_ac_decision = coord_data.get("should_use_ac", False)
+        global_should_use_ac = coord_data.get("should_use_ac", False)
+        global_arbitrage_reason = coord_data.get("arbitrage_reason", "")
+
+        # 6. Arbitrage decision: AC vs Gas explanation
+        if not self._ac_entity:
+            self._ac_block_reason = "Geen airco gekoppeld aan deze kamer (verwarmen verloopt altijd via CV/gas)"
+            ac_eligible = False
+        elif is_sleep:
+            self._ac_block_reason = "Airco geblokkeerd: Slaap-modus actief (geen tocht of ventilatorgeluid in de slaapkamer)"
+            ac_eligible = False
+        elif is_quiet:
+            self._ac_block_reason = f"Airco geblokkeerd: Stille uren actief ({quiet_start} - {quiet_end})"
+            ac_eligible = False
+        elif not global_should_use_ac:
+            self._ac_block_reason = f"Airco financieel/technisch niet geselecteerd: {global_arbitrage_reason}"
+            ac_eligible = False
+        else:
+            self._ac_block_reason = f"Airco voordelig en actief: {global_arbitrage_reason}"
+            ac_eligible = True
+
+        use_ac_decision = needs_heat and ac_eligible
 
         # 7. Actuate hardware & update demand
         if is_window_paused:
             self._active_heat_source = HEAT_SOURCE_PAUSED_WINDOW
             self._attr_hvac_action = HVACAction.OFF
             self._demand_active = False
+            self._action_summary = "Raam open gedetecteerd: TRV's gesloten (7.0°C vorstbeveiliging), airco uitgeschakeld"
             await self._set_trvs(DEFAULT_FROST_TEMP)
             await self._set_ac(HVACMode.OFF)
         elif self._attr_hvac_mode == HVACMode.OFF:
             self._active_heat_source = HEAT_SOURCE_IDLE
             self._attr_hvac_action = HVACAction.OFF
             self._demand_active = False
+            self._action_summary = "Thermostaat staat op UIT: TRV's op vorstbeveiliging (7.0°C), airco uit"
             await self._set_trvs(DEFAULT_FROST_TEMP)
             await self._set_ac(HVACMode.OFF)
         elif needs_cool:
             self._active_heat_source = HEAT_SOURCE_AC_COOL
             self._attr_hvac_action = HVACAction.COOLING
             self._demand_active = False
+            self._action_summary = f"Koelen via Airco ({self._ac_entity}) naar {self._attr_target_temperature}°C"
             await self._set_trvs(DEFAULT_FROST_TEMP)
             await self._set_ac(HVACMode.COOL, self._attr_target_temperature)
         elif needs_heat:
@@ -424,6 +520,10 @@ class HAHeatingRoomClimate(CoordinatorEntity[HAHeatingCoordinator], ClimateEntit
                 self._active_heat_source = HEAT_SOURCE_AC_HEAT
                 self._attr_hvac_action = HVACAction.HEATING
                 self._demand_active = False
+                self._action_summary = (
+                    f"Verwarmen via Airco ({self._ac_entity}) naar {self._attr_target_temperature}°C. "
+                    f"TRV's blijven gesloten (7.0°C), Master ketel blijft uit."
+                )
                 await self._set_trvs(DEFAULT_FROST_TEMP)
                 await self._set_ac(HVACMode.HEAT, self._attr_target_temperature)
             else:
@@ -431,6 +531,10 @@ class HAHeatingRoomClimate(CoordinatorEntity[HAHeatingCoordinator], ClimateEntit
                 self._active_heat_source = HEAT_SOURCE_GAS
                 self._attr_hvac_action = HVACAction.HEATING
                 self._demand_active = True
+                self._action_summary = (
+                    f"Verwarmen via CV-ketel / radiatoren. TRV's geopend naar {self._attr_target_temperature}°C, "
+                    f"Master thermostaat geactiveerd. [Reden geen airco: {self._ac_block_reason}]"
+                )
                 await self._set_trvs(self._attr_target_temperature)
                 await self._set_ac(HVACMode.OFF)
         else:
@@ -438,6 +542,7 @@ class HAHeatingRoomClimate(CoordinatorEntity[HAHeatingCoordinator], ClimateEntit
             self._active_heat_source = HEAT_SOURCE_IDLE
             self._attr_hvac_action = HVACAction.IDLE
             self._demand_active = False
+            self._action_summary = f"Rust: doeltemperatuur ({self._attr_target_temperature}°C) is bereikt"
             await self._set_trvs(self._attr_target_temperature)
             await self._set_ac(HVACMode.OFF)
 
@@ -550,6 +655,24 @@ class HAHeatingRoomClimate(CoordinatorEntity[HAHeatingCoordinator], ClimateEntit
             "thermal_cost_gas": coord_data.get("thermal_cost_gas"),
             "thermal_cost_electric": coord_data.get("thermal_cost_electric"),
             "airco_cop": coord_data.get("airco_cop"),
+            # Diagnostic attributes for debugging and transparency
+            "diagnostic_target_reason": self._reason,
+            "diagnostic_demand_reason": self._demand_reason,
+            "diagnostic_ac_eligible": (self._ac_entity is not None and not is_quiet and self._attr_preset_mode != PRESET_SLEEP),
+            "diagnostic_ac_block_reason": self._ac_block_reason,
+            "diagnostic_arbitrage_reason": coord_data.get("arbitrage_reason", ""),
+            "diagnostic_action_summary": self._action_summary,
+            "diagnostic_master_status": (
+                self._master_controller.get_status_description(now)
+                if self._master_controller
+                else "Geen master gekoppeld"
+            ),
+            "manual_override_temp": self._manual_override_temp,
+            "manual_override_until": (
+                self._manual_override_until.isoformat()
+                if self._manual_override_until
+                else None
+            ),
         }
 
     async def async_will_remove_from_hass(self) -> None:

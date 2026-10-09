@@ -77,7 +77,7 @@
   "services": {
     "generate_dashboard": {
       "name": "Genereer Dashboard",
-      "description": "Haalt de actuele HA Heating configuratie op en genereert een kant-en-klaar Lovelace Dashboard op maat (/config/ha_heating_dashboard.yaml)."
+      "description": "Haalt de actuele HA Heating configuratie op en genereert een kant-en-klaar Lovelace Dashboard op maat (/config/lovelace/ha_heating_dashboard.yaml)."
     }
   }
 }

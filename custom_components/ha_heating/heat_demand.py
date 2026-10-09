@@ -69,6 +69,38 @@ class MasterThermostatController:
         """Return True if the master thermostat is currently calling for heat."""
         return self._is_active
 
+    def get_status_description(self, current_dt: datetime) -> str:
+        """Return a human-readable status description including anti-cycling."""
+        if self._is_active:
+            rooms_str = ", ".join(list(self.active_demanding_rooms)) if self.active_demanding_rooms else "geen"
+            if self._last_state_change:
+                elapsed = (current_dt - self._last_state_change).total_seconds()
+                if elapsed < self.min_cycle_duration_sec:
+                    remaining = int(self.min_cycle_duration_sec - elapsed)
+                    return f"Actief (vraag van: {rooms_str}), anti-cycling vergrendeld aan (nog {remaining}s)"
+            return f"Actief (vraag van: {rooms_str})"
+        else:
+            if self._last_state_change:
+                elapsed = (current_dt - self._last_state_change).total_seconds()
+                if elapsed < self.min_off_duration_sec:
+                    remaining = int(self.min_off_duration_sec - elapsed)
+                    return f"Rust (geen vraag), anti-cycling vergrendeld uit (nog {remaining}s)"
+            return "Rust (geen actieve warmtevraag vanuit kamers)"
+
+    def get_diagnostics(self, current_dt: datetime) -> dict[str, Any]:
+        """Return full diagnostics dictionary for master thermostat."""
+        return {
+            "master_entity_id": self.master_entity_id,
+            "control_mode": self.control_mode,
+            "is_active": self._is_active,
+            "boost_offset": self.boost_offset,
+            "current_boost_temp": self.calculate_boost_temp(),
+            "idle_temp": self.idle_temp,
+            "linked_rooms": list(self.linked_rooms),
+            "active_demanding_rooms": list(self.active_demanding_rooms),
+            "status_description": self.get_status_description(current_dt),
+        }
+
     def register_room(self, room_id: str) -> None:
         """Register a room to this master thermostat."""
         self.linked_rooms.add(room_id)

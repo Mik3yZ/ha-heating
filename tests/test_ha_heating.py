@@ -4,7 +4,8 @@ from unittest.mock import MagicMock
 # Mock homeassistant modules so tests run in environments without HA core installed
 if "homeassistant" not in sys.modules:
     class MockDUC:
-        def __init__(self, *args, **kwargs): pass
+        def __init__(self, *args, **kwargs):
+            self.data = {}
         def __class_getitem__(cls, item): return cls
         def async_update_listeners(self): pass
 
@@ -12,6 +13,8 @@ if "homeassistant" not in sys.modules:
         def __init__(self, coordinator): self.coordinator = coordinator
         def __class_getitem__(cls, item): return cls
         def async_write_ha_state(self): pass
+        async def async_added_to_hass(self): pass
+        def async_on_remove(self, target): pass
 
     class MockSE: pass
 
@@ -22,7 +25,11 @@ if "homeassistant" not in sys.modules:
     sys.modules["homeassistant.core"] = MagicMock()
     sys.modules["homeassistant.components"] = MagicMock()
     sys.modules["homeassistant.components.http"] = MagicMock()
-    sys.modules["homeassistant.components.climate"] = MagicMock()
+    class MockClimateEntity: pass
+
+    climate_mod = MagicMock()
+    climate_mod.ClimateEntity = MockClimateEntity
+    sys.modules["homeassistant.components.climate"] = climate_mod
 
     sw_mod = MagicMock()
     sw_mod.SwitchEntity = MockSE
@@ -40,7 +47,17 @@ if "homeassistant" not in sys.modules:
     duc_mod.CoordinatorEntity = MockCE
     sys.modules["homeassistant.helpers.update_coordinator"] = duc_mod
 
-from datetime import datetime, date
+    class MockRE:
+        async def async_get_last_state(self):
+            return None
+        async def async_added_to_hass(self):
+            pass
+
+    re_mod = MagicMock()
+    re_mod.RestoreEntity = MockRE
+    sys.modules["homeassistant.helpers.restore_state"] = re_mod
+
+from datetime import datetime, date, timedelta
 import unittest
 
 from custom_components.ha_heating.energy_arbitrage import EnergyArbitrage
@@ -413,7 +430,7 @@ class TestMasterSwitchAndCoordinator(unittest.IsolatedAsyncioTestCase):
 
         # Attach a mock master controller with active demand
         mock_master = MagicMock()
-        mock_master._active_room_demands = {"room_1"}
+        mock_master.active_demanding_rooms = {"room_1"}
         mock_master.update_room_demand = AsyncMock()
         coord.master_controllers["climate.ketel"] = mock_master
 
@@ -431,6 +448,31 @@ class TestMasterSwitchAndCoordinator(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(call_args[1])  # Demand False
 
         # Turn back ON
+        await switch.async_turn_on()
+        self.assertTrue(switch.is_on)
+        self.assertTrue(coord.system_enabled)
+
+    async def test_master_switch_mappingproxy(self):
+        from types import MappingProxyType
+        from unittest.mock import AsyncMock
+        from custom_components.ha_heating.coordinator import HAHeatingCoordinator
+        from custom_components.ha_heating.switch import HAHeatingMasterSwitch
+
+        hass_mock = MagicMock()
+        hass_mock.services.async_call = AsyncMock()
+
+        # HA passes entry.data as MappingProxyType (immutable mappingproxy)
+        proxy_data = MappingProxyType({"system_enabled": True})
+        coord = HAHeatingCoordinator(hass_mock, proxy_data)
+
+        switch = HAHeatingMasterSwitch(coord)
+        self.assertTrue(switch.is_on)
+
+        # Must not raise: TypeError: 'mappingproxy' object does not support item assignment
+        await switch.async_turn_off()
+        self.assertFalse(switch.is_on)
+        self.assertFalse(coord.system_enabled)
+
         await switch.async_turn_on()
         self.assertTrue(switch.is_on)
         self.assertTrue(coord.system_enabled)
@@ -580,7 +622,139 @@ class TestDashboardGenerator(unittest.TestCase):
         # Energy & Arbitrage check
         self.assertIn("sensor.energy_gas_cost", yaml_str)
         self.assertIn("sensor.energy_elec_cost", yaml_str)
-        self.assertIn("sensor.ha_heating_central_hub_thermische_kosten_gas", yaml_str)
+        # Debug tab check
+        self.assertIn("Diagnostiek & Debug", yaml_str)
+        self.assertIn("path: debug", yaml_str)
+        self.assertIn("Besluitvorming: Woonkamer", yaml_str)
+        self.assertIn("diagnostic_ac_block_reason", yaml_str)
+        # Panel & Grid layout & Border check
+        self.assertIn("panel: true", yaml_str)
+        self.assertIn("type: grid", yaml_str)
+        self.assertIn("border: 1px solid", yaml_str)
+        self.assertNotIn("geconfigureerd", yaml_str)
+
+    def test_async_generate_dashboard_file_and_cache(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import AsyncMock
+        import asyncio
+        from custom_components.ha_heating.dashboard import async_generate_dashboard
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            hass_mock = MagicMock()
+            hass_mock.config.config_dir = tmpdir
+            hass_mock.config_entries.async_entries.return_value = []
+            hass_mock.services.async_call = AsyncMock()
+
+            # First run: should write file and send notification
+            yaml_1 = asyncio.run(async_generate_dashboard(hass_mock))
+            target_path = Path(tmpdir) / "lovelace" / "ha_heating_dashboard.yaml"
+            self.assertTrue(target_path.exists())
+            self.assertEqual(target_path.read_text(encoding="utf-8").strip(), yaml_1.strip())
+            self.assertEqual(hass_mock.services.async_call.call_count, 1)
+
+            # Second run with unchanged content: should NOT rewrite or send notification again
+            hass_mock.services.async_call.reset_mock()
+            yaml_2 = asyncio.run(async_generate_dashboard(hass_mock))
+            self.assertEqual(yaml_1, yaml_2)
+            self.assertEqual(hass_mock.services.async_call.call_count, 0)
+
+
+class TestClimateRestoreAndDiagnostics(unittest.IsolatedAsyncioTestCase):
+    """Test state restoration after reboot and detailed diagnostic attributes."""
+
+    async def test_restore_state_eco_preset(self):
+        from unittest.mock import AsyncMock
+        from custom_components.ha_heating.climate import HAHeatingRoomClimate
+        from custom_components.ha_heating.coordinator import HAHeatingCoordinator
+        from custom_components.ha_heating.const import CONF_ROOM_NAME, CONF_TRVS, PRESET_ECO
+
+        hass_mock = MagicMock()
+        hass_mock.services.async_call = AsyncMock()
+
+        coord = HAHeatingCoordinator(hass_mock, {})
+        entry_mock = MagicMock()
+        entry_mock.entry_id = "test_room_1"
+        entry_mock.data = {
+            CONF_ROOM_NAME: "Woonkamer",
+            CONF_TRVS: ["climate.trv_1"],
+        }
+        entry_mock.options = {}
+
+        climate = HAHeatingRoomClimate(hass_mock, entry_mock, coord)
+
+        # Mock last state with eco preset
+        last_state = MagicMock()
+        last_state.state = "heat"
+        last_state.attributes = {
+            "preset_mode": PRESET_ECO,
+            "manual_override_temp": 19.5,
+            "manual_override_until": (datetime.now() + timedelta(hours=1)).isoformat(),
+        }
+        climate.async_get_last_state = AsyncMock(return_value=last_state)
+
+        await climate.async_added_to_hass()
+
+        self.assertEqual(climate._attr_preset_mode, PRESET_ECO)
+        self.assertEqual(climate._manual_override_temp, 19.5)
+
+    async def test_diagnostics_when_ac_cheaper_but_quiet_hours_active(self):
+        from unittest.mock import AsyncMock
+        from custom_components.ha_heating.climate import HAHeatingRoomClimate
+        from custom_components.ha_heating.coordinator import HAHeatingCoordinator
+        from custom_components.ha_heating.const import (
+            CONF_AC_ENTITY,
+            CONF_AC_QUIET_END,
+            CONF_AC_QUIET_START,
+            CONF_ROOM_NAME,
+            CONF_ROOM_TEMP_SENSOR,
+            CONF_TRVS,
+            HEAT_SOURCE_GAS,
+        )
+
+        hass_mock = MagicMock()
+        hass_mock.services.async_call = AsyncMock()
+
+        room_temp_state = MagicMock()
+        room_temp_state.state = "17.0"
+        hass_mock.states.get.side_effect = lambda ent: room_temp_state if ent == "sensor.temp" else None
+
+        coord = HAHeatingCoordinator(hass_mock, {})
+        coord.data = {
+            "should_use_ac": True,
+            "arbitrage_reason": "Airco is cheaper: €0.075/kWh vs Gas €0.150/kWh",
+            "active_week": "week_a",
+            "thermal_cost_gas": 0.15,
+            "thermal_cost_electric": 0.075,
+            "airco_cop": 4.0,
+        }
+
+        entry_mock = MagicMock()
+        entry_mock.entry_id = "test_room_1"
+        entry_mock.data = {
+            CONF_ROOM_NAME: "Woonkamer",
+            CONF_TRVS: ["climate.trv_1"],
+            CONF_AC_ENTITY: "climate.airco_woonkamer",
+            CONF_ROOM_TEMP_SENSOR: "sensor.temp",
+            CONF_AC_QUIET_START: "00:00",
+            CONF_AC_QUIET_END: "23:59",  # Covers all day
+        }
+        entry_mock.options = {}
+
+        climate = HAHeatingRoomClimate(hass_mock, entry_mock, coord)
+        climate.async_get_last_state = AsyncMock(return_value=None)
+        await climate.async_added_to_hass()
+
+        # Because quiet hours are active, heat source must fall back to GAS
+        self.assertEqual(climate._active_heat_source, HEAT_SOURCE_GAS)
+        self.assertTrue(climate._demand_active)
+
+        # Check diagnostics
+        attrs = climate.extra_state_attributes
+        self.assertFalse(attrs["diagnostic_ac_eligible"])
+        self.assertIn("Stille uren actief", attrs["diagnostic_ac_block_reason"])
+        self.assertIn("Warmtevraag actief", attrs["diagnostic_demand_reason"])
+        self.assertIn("CV-ketel", attrs["diagnostic_action_summary"])
 
 
 if __name__ == "__main__":
