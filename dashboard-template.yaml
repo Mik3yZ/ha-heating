@@ -6,7 +6,8 @@
 # Benodigde HACS uitbreidingen:
 # 1. Mushroom (lovelace-mushroom)
 #    Installeer via HACS: HACS > Frontend > Mushroom
-# 2. Optioneel: Stack In Card (custom:stack-in-card) & Card Mod (card-mod)
+# 2. Stack In Card (custom:stack-in-card)
+#    Installeer via HACS: HACS > Frontend > Stack In Card
 #
 # Tip: Je kunt dit dashboard ook automatisch op maat laten genereren voor jouw
 # specifieke kamers & sensoren via de Home Assistant actie:
@@ -40,20 +41,18 @@ views:
             entity: sensor.ha_heating_central_hub_arbitrage_advies
             icon: mdi:scale-balance
             icon_color: amber
-            content: "{{ states('sensor.ha_heating_central_hub_arbitrage_advies') }}"
+            content: "{{ 'Airco voordeliger' if 'Airco is cheaper' in states('sensor.ha_heating_central_hub_arbitrage_advies') or 'Airco' in states('sensor.ha_heating_central_hub_arbitrage_advies') else ('Gas voordeliger' if 'Gas' in states('sensor.ha_heating_central_hub_arbitrage_advies') else states('sensor.ha_heating_central_hub_arbitrage_advies')) }}"
+            tap_action:
+              action: more-info
           - type: template
             entity: sensor.ha_heating_central_hub_airco_cop
             icon: mdi:heat-pump-outline
             icon_color: light-blue
             content: "COP {{ states('sensor.ha_heating_central_hub_airco_cop') }}"
 
-      # --- Ruimte Groep: Begane Grond ---
-      - type: custom:mushroom-title-card
-        title: "Begane Grond"
-        subtitle: "Woonkamer & Keuken"
-
-      # Kamer: Woonkamer
-      - type: vertical-stack
+      # Kamer: Woonkamer (Begane Grond)
+      - type: custom:stack-in-card
+        mode: vertical
         cards:
           - type: custom:mushroom-climate-card
             entity: climate.woonkamer
@@ -128,7 +127,7 @@ views:
 
           # Status & Componenten
           - type: custom:mushroom-chips-card
-            alignment: start
+            alignment: center
             chips:
               - type: template
                 icon: "{{ 'mdi:fire' if is_state_attr('climate.woonkamer', 'active_heat_source', 'gas') else ('mdi:snowflake' if is_state_attr('climate.woonkamer', 'active_heat_source', 'ac_cool') else ('mdi:heat-pump-outline' if is_state_attr('climate.woonkamer', 'active_heat_source', 'ac_heat') else ('mdi:window-open-variant' if is_state_attr('climate.woonkamer', 'active_heat_source', 'window_open') else 'mdi:power-sleep'))) }}"
@@ -149,11 +148,12 @@ views:
                 icon: mdi:air-conditioner
 
       # Master Thermostaten (Ketelkoppeling)
-      - type: custom:mushroom-title-card
-        title: "Centrale Verwarming"
-        subtitle: "Master Thermostaat (Vraaggestuurd)"
-      - type: vertical-stack
+      - type: custom:stack-in-card
+        mode: vertical
         cards:
+          - type: custom:mushroom-title-card
+            title: "Centrale Verwarming"
+            subtitle: "Master Thermostaat (Vraaggestuurd)"
           - type: custom:mushroom-climate-card
             entity: climate.thermostaat_boven
             name: "Master Thermostaat"

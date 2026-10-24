@@ -109,11 +109,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await async_setup_dashboard_service(hass)
 
     if entry_type == ENTRY_TYPE_HUB:
-        coordinator = HAHeatingCoordinator(hass, entry.data, entry=entry)
-        hass.data[DOMAIN]["coordinator"] = coordinator
         hass.data[DOMAIN]["hub_entry"] = entry
+        if "coordinator" not in hass.data[DOMAIN]:
+            coordinator = HAHeatingCoordinator(hass, entry.data, entry=entry)
+            hass.data[DOMAIN]["coordinator"] = coordinator
+            await coordinator.async_setup()
+        else:
+            coordinator = hass.data[DOMAIN]["coordinator"]
+            merged = dict(entry.data)
+            if getattr(entry, "options", None):
+                merged.update(dict(entry.options))
+            coordinator.hub_config = merged
 
-        await coordinator.async_setup()
         try:
             await coordinator.async_config_entry_first_refresh()
         except Exception as err:
@@ -122,12 +129,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         await _async_forward_entry_setups(hass, entry, PLATFORMS_HUB)
     else:
-        # Room entry requires coordinator to exist
+        # Ensure coordinator exists even if Room entry loads before Hub entry
         if "coordinator" not in hass.data[DOMAIN]:
-            _LOGGER.warning(
-                "Hub entry not initialized yet. Room '%s' may have limited coordination.",
-                entry.title,
-            )
+            hub_entries = [
+                e
+                for e in hass.config_entries.async_entries(DOMAIN)
+                if e.data.get(CONF_ENTRY_TYPE) == ENTRY_TYPE_HUB
+            ]
+            hub_entry = hub_entries[0] if hub_entries else None
+            hub_data = hub_entry.data if hub_entry else {}
+            coordinator = HAHeatingCoordinator(hass, hub_data, entry=hub_entry)
+            hass.data[DOMAIN]["coordinator"] = coordinator
+            await coordinator.async_setup()
         await _async_forward_entry_setups(hass, entry, PLATFORMS_ROOM)
 
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))

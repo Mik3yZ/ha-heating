@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 import logging
+from typing import Any
 
 from homeassistant.components.climate import HVACMode
 from homeassistant.core import Event, HomeAssistant, callback
@@ -63,6 +64,7 @@ class MasterThermostatController:
         self._is_active: bool = False
         self._last_state_change: datetime | None = None
         self._unsub_listener = None
+        self._deferred_timer = None
 
     @property
     def is_heating_active(self) -> bool:
@@ -115,6 +117,7 @@ class MasterThermostatController:
         room_id: str,
         has_demand: bool,
         current_dt: datetime,
+        force: bool = False,
     ) -> None:
         """Update heat demand status for a linked room and adjust master thermostat if needed."""
         if room_id not in self.linked_rooms:
@@ -126,17 +129,47 @@ class MasterThermostatController:
             self.active_demanding_rooms.discard(room_id)
 
         target_active = len(self.active_demanding_rooms) > 0
-        await self._apply_demand_state(target_active, current_dt)
+        await self._apply_demand_state(target_active, current_dt, force=force)
+
+    def _cancel_deferred_timer(self) -> None:
+        """Cancel any pending anti-cycling retry timer."""
+        if self._deferred_timer is not None:
+            try:
+                self._deferred_timer.cancel()
+            except Exception:
+                pass
+            self._deferred_timer = None
+
+    def _schedule_deferred_eval(self, delay_sec: float) -> None:
+        """Schedule a deferred demand state check after the anti-cycling lock expires."""
+        self._cancel_deferred_timer()
+        try:
+            loop = getattr(self.hass, "loop", None)
+            if loop is not None and hasattr(loop, "call_later"):
+                def _on_timer() -> None:
+                    self._deferred_timer = None
+                    if hasattr(self.hass, "async_create_task"):
+                        self.hass.async_create_task(
+                            self._apply_demand_state(
+                                len(self.active_demanding_rooms) > 0,
+                                datetime.now(),
+                            )
+                        )
+
+                self._deferred_timer = loop.call_later(max(0.5, delay_sec + 0.5), _on_timer)
+        except Exception as err:
+            _LOGGER.debug("Could not schedule deferred anti-cycling timer: %s", err)
 
     async def _apply_demand_state(
-        self, target_active: bool, current_dt: datetime
+        self, target_active: bool, current_dt: datetime, force: bool = False
     ) -> None:
         """Evaluate anti-cycling timers and apply state to master thermostat."""
         if target_active == self._is_active:
+            self._cancel_deferred_timer()
             return
 
-        # Check anti-cycling rules
-        if self._last_state_change is not None:
+        # Check anti-cycling rules (unless forced, e.g. master switch turned OFF)
+        if not force and self._last_state_change is not None:
             time_since_change = (
                 current_dt - self._last_state_change
             ).total_seconds()
@@ -150,6 +183,7 @@ class MasterThermostatController:
                         self.master_entity_id,
                         remaining,
                     )
+                    self._schedule_deferred_eval(remaining)
                     return
 
             elif not self._is_active and target_active:
@@ -161,8 +195,10 @@ class MasterThermostatController:
                         self.master_entity_id,
                         remaining,
                     )
+                    self._schedule_deferred_eval(remaining)
                     return
 
+        self._cancel_deferred_timer()
         # Apply state
         self._is_active = target_active
         self._last_state_change = current_dt
@@ -340,6 +376,7 @@ class MasterThermostatController:
 
     def stop_tracking(self) -> None:
         """Stop tracking master thermostat state changes."""
+        self._cancel_deferred_timer()
         if self._unsub_listener:
             try:
                 self._unsub_listener()

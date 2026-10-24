@@ -378,6 +378,14 @@ class HAHeatingOptionsFlowHandler(config_entries.OptionsFlow):
                         )
                     ),
                     vol.Optional(
+                        CONF_CYCLE_ANCHOR_DATE,
+                        description={"suggested_value": current_data.get(CONF_CYCLE_ANCHOR_DATE)},
+                    ): selector.TextSelector(),
+                    vol.Optional(
+                        CONF_CYCLE_ENTITY,
+                        description={"suggested_value": current_data.get(CONF_CYCLE_ENTITY)},
+                    ): selector.EntitySelector(selector.EntitySelectorConfig()),
+                    vol.Optional(
                         CONF_NOTIFY_SENSOR_OFFLINE,
                         default=current_data.get(
                             CONF_NOTIFY_SENSOR_OFFLINE, DEFAULT_NOTIFY_SENSOR_OFFLINE
@@ -423,6 +431,18 @@ class HAHeatingOptionsFlowHandler(config_entries.OptionsFlow):
                         default=current_data.get(CONF_WINDOW_SENSORS, []),
                     ): selector.EntitySelector(
                         selector.EntitySelectorConfig(domain="binary_sensor", multiple=True)
+                    ),
+                    vol.Optional(
+                        CONF_WINDOW_OPEN_DELAY,
+                        default=current_data.get(CONF_WINDOW_OPEN_DELAY, DEFAULT_WINDOW_OPEN_DELAY),
+                    ): selector.NumberSelector(
+                        selector.NumberSelectorConfig(min=0, max=600, step=5)
+                    ),
+                    vol.Optional(
+                        CONF_WINDOW_CLOSE_DELAY,
+                        default=current_data.get(CONF_WINDOW_CLOSE_DELAY, DEFAULT_WINDOW_CLOSE_DELAY),
+                    ): selector.NumberSelector(
+                        selector.NumberSelectorConfig(min=0, max=300, step=5)
                     ),
                     vol.Optional(
                         CONF_MASTER_THERMOSTAT,
@@ -474,6 +494,18 @@ class HAHeatingOptionsFlowHandler(config_entries.OptionsFlow):
                         default=current_data.get(CONF_AC_QUIET_END, "07:00"),
                     ): selector.TextSelector(),
                     vol.Optional(
+                        CONF_AC_ENABLE_COOLING,
+                        default=current_data.get(CONF_AC_ENABLE_COOLING, True),
+                    ): selector.BooleanSelector(),
+                    vol.Optional(
+                        CONF_SCHEDULE_WEEK_A,
+                        description={"suggested_value": current_data.get(CONF_SCHEDULE_WEEK_A)},
+                    ): selector.EntitySelector(selector.EntitySelectorConfig(domain="schedule")),
+                    vol.Optional(
+                        CONF_SCHEDULE_WEEK_B,
+                        description={"suggested_value": current_data.get(CONF_SCHEDULE_WEEK_B)},
+                    ): selector.EntitySelector(selector.EntitySelectorConfig(domain="schedule")),
+                    vol.Optional(
                         CONF_TEMP_COMFORT,
                         default=current_data.get(CONF_TEMP_COMFORT, DEFAULT_TEMP_COMFORT),
                     ): selector.NumberSelector(selector.NumberSelectorConfig(min=15, max=26, step=0.5)),
@@ -485,6 +517,18 @@ class HAHeatingOptionsFlowHandler(config_entries.OptionsFlow):
                         CONF_TEMP_SLEEP,
                         default=current_data.get(CONF_TEMP_SLEEP, DEFAULT_TEMP_SLEEP),
                     ): selector.NumberSelector(selector.NumberSelectorConfig(min=10, max=20, step=0.5)),
+                    vol.Optional(
+                        CONF_TEMP_AWAY,
+                        default=current_data.get(CONF_TEMP_AWAY, DEFAULT_TEMP_AWAY),
+                    ): selector.NumberSelector(selector.NumberSelectorConfig(min=10, max=18, step=0.5)),
+                    vol.Optional(
+                        CONF_TEMP_BOOST,
+                        default=current_data.get(CONF_TEMP_BOOST, DEFAULT_TEMP_BOOST),
+                    ): selector.NumberSelector(selector.NumberSelectorConfig(min=18, max=28, step=0.5)),
+                    vol.Optional(
+                        CONF_TEMP_HOLIDAY,
+                        default=current_data.get(CONF_TEMP_HOLIDAY, DEFAULT_TEMP_HOLIDAY),
+                    ): selector.NumberSelector(selector.NumberSelectorConfig(min=10, max=18, step=0.5)),
                 }
             )
 

@@ -600,10 +600,13 @@ class TestDashboardGenerator(unittest.TestCase):
         yaml_str = generate_dashboard_yaml(hub_data, hub_sensors, rooms, masters)
 
         self.assertIn("title: HA Heating Klimaat", yaml_str)
-        # Modern Mushroom cards check
+        # Modern Mushroom cards & Stack In Card check
         self.assertIn("custom:mushroom-chips-card", yaml_str)
         self.assertIn("custom:mushroom-climate-card", yaml_str)
         self.assertIn("custom:mushroom-title-card", yaml_str)
+        self.assertIn("custom:stack-in-card", yaml_str)
+        self.assertIn("mode: vertical", yaml_str)
+        self.assertIn("Airco voordeliger", yaml_str)
         # Master switch chip check
         self.assertIn("switch.ha_heating_central_hub_hoofdschakelaar", yaml_str)
         # Area grouping check
@@ -750,6 +753,90 @@ class TestClimateRestoreAndDiagnostics(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Stille uren actief", attrs["diagnostic_ac_block_reason"])
         self.assertIn("Warmtevraag actief", attrs["diagnostic_demand_reason"])
         self.assertIn("CV-ketel", attrs["diagnostic_action_summary"])
+
+    async def test_hysteresis_schmitt_trigger_and_command_deduplication(self):
+        from unittest.mock import AsyncMock
+        from custom_components.ha_heating.climate import HAHeatingRoomClimate, HVACAction
+        from custom_components.ha_heating.coordinator import HAHeatingCoordinator
+        from custom_components.ha_heating.const import (
+            CONF_ROOM_NAME,
+            CONF_ROOM_TEMP_SENSOR,
+            CONF_TRVS,
+        )
+
+        hass_mock = MagicMock()
+        hass_mock.services.async_call = AsyncMock()
+
+        room_temp_state = MagicMock()
+        room_temp_state.state = "20.2"  # Target is 20.5, diff 0.3 < 0.5 -> should stay IDLE
+        hass_mock.states.get.side_effect = lambda ent: room_temp_state if ent == "sensor.temp" else None
+
+        coord = HAHeatingCoordinator(hass_mock, {})
+        coord.data = {"active_week": "week_a", "should_use_ac": False}
+
+        entry_mock = MagicMock()
+        entry_mock.entry_id = "test_room_hyst"
+        entry_mock.data = {
+            CONF_ROOM_NAME: "Slaapkamer",
+            CONF_TRVS: ["climate.trv_1"],
+            CONF_ROOM_TEMP_SENSOR: "sensor.temp",
+        }
+        entry_mock.options = {}
+
+        climate = HAHeatingRoomClimate(hass_mock, entry_mock, coord)
+        climate.async_get_last_state = AsyncMock(return_value=None)
+        await climate.async_added_to_hass()
+
+        # 1. At 20.2°C (deficit 0.3°C < 0.5°C): IDLE, TRV set once to 20.5°C
+        self.assertEqual(climate._attr_hvac_action, HVACAction.IDLE)
+        self.assertFalse(climate._demand_active)
+        self.assertEqual(hass_mock.services.async_call.call_count, 1)
+
+        # Re-evaluating with same target should NOT send duplicate TRV command
+        await climate._async_evaluate()
+        self.assertEqual(hass_mock.services.async_call.call_count, 1)
+
+        # 2. Drop to 20.0°C (deficit 0.5°C >= 0.5°C): starts HEATING
+        room_temp_state.state = "20.0"
+        await climate._async_evaluate()
+        self.assertEqual(climate._attr_hvac_action, HVACAction.HEATING)
+        self.assertTrue(climate._demand_active)
+
+        # 3. Warm up to 20.2°C (deficit 0.3°C > 0.1°C off-deadband): MUST stay HEATING
+        room_temp_state.state = "20.2"
+        await climate._async_evaluate()
+        self.assertEqual(climate._attr_hvac_action, HVACAction.HEATING)
+        self.assertTrue(climate._demand_active)
+        self.assertIn("hysterese", climate.extra_state_attributes["diagnostic_demand_reason"])
+
+        # 4. Warm up to 20.4°C (deficit 0.1°C <= 0.1°C off-deadband): stops HEATING -> IDLE
+        room_temp_state.state = "20.4"
+        await climate._async_evaluate()
+        self.assertEqual(climate._attr_hvac_action, HVACAction.IDLE)
+        self.assertFalse(climate._demand_active)
+
+    async def test_master_switch_off_forces_boiler_shutdown_immediately(self):
+        from unittest.mock import AsyncMock
+        from custom_components.ha_heating.coordinator import HAHeatingCoordinator
+        from custom_components.ha_heating.const import MASTER_MODE_SETPOINT_BOOST
+
+        hass_mock = MagicMock()
+        hass_mock.services.async_call = AsyncMock()
+
+        coord = HAHeatingCoordinator(hass_mock, {})
+        ctrl = coord.get_or_create_master_controller(
+            master_entity_id="climate.master",
+            control_mode=MASTER_MODE_SETPOINT_BOOST,
+        )
+        ctrl.register_room("room_1")
+
+        t0 = datetime.now()
+        await ctrl.update_room_demand("room_1", True, t0)
+        self.assertTrue(ctrl.is_heating_active)
+
+        # Turn off master switch just 10s later (inside 300s anti-cycling window)
+        await coord.async_set_system_enabled(False)
+        self.assertFalse(ctrl.is_heating_active)
 
 
 if __name__ == "__main__":

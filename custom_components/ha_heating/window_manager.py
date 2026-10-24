@@ -36,8 +36,17 @@ class WindowManager:
         any_window_open: bool,
         loop: asyncio.AbstractEventLoop,
         on_state_change: Callable[[str, bool], None],
+        open_delay_sec: int | None = None,
+        close_delay_sec: int | None = None,
     ) -> None:
         """Handle a binary sensor state update for windows in a room."""
+        effective_open_delay = (
+            int(open_delay_sec) if open_delay_sec is not None else self.open_delay_sec
+        )
+        effective_close_delay = (
+            int(close_delay_sec) if close_delay_sec is not None else self.close_delay_sec
+        )
+
         # Cancel any pending timer for this room
         if room_id in self._active_timers:
             self._active_timers[room_id].cancel()
@@ -46,7 +55,7 @@ class WindowManager:
         current_paused = self._window_open_states.get(room_id, False)
 
         if any_window_open and not current_paused:
-            # Window was opened. Schedule pause after open_delay_sec
+            # Window was opened. Schedule pause after effective_open_delay
             def _trigger_pause():
                 self._window_open_states[room_id] = True
                 if room_id in self._active_timers:
@@ -54,21 +63,21 @@ class WindowManager:
                 _LOGGER.info(
                     "Room '%s': Window open delay (%ss) elapsed -> Pausing heating",
                     room_id,
-                    self.open_delay_sec,
+                    effective_open_delay,
                 )
                 on_state_change(room_id, True)
 
             _LOGGER.debug(
                 "Room '%s': Window opened, delaying pause for %s seconds",
                 room_id,
-                self.open_delay_sec,
+                effective_open_delay,
             )
             self._active_timers[room_id] = loop.call_later(
-                self.open_delay_sec, _trigger_pause
+                effective_open_delay, _trigger_pause
             )
 
         elif not any_window_open and current_paused:
-            # All windows were closed. Schedule resume after close_delay_sec
+            # All windows were closed. Schedule resume after effective_close_delay
             def _trigger_resume():
                 self._window_open_states[room_id] = False
                 if room_id in self._active_timers:
@@ -76,17 +85,17 @@ class WindowManager:
                 _LOGGER.info(
                     "Room '%s': Window close delay (%ss) elapsed -> Resuming heating",
                     room_id,
-                    self.close_delay_sec,
+                    effective_close_delay,
                 )
                 on_state_change(room_id, False)
 
             _LOGGER.debug(
                 "Room '%s': Windows closed, delaying resume for %s seconds",
                 room_id,
-                self.close_delay_sec,
+                effective_close_delay,
             )
             self._active_timers[room_id] = loop.call_later(
-                self.close_delay_sec, _trigger_resume
+                effective_close_delay, _trigger_resume
             )
 
     def cleanup(self, room_id: str | None = None) -> None:

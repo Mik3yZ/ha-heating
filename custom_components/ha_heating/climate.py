@@ -56,6 +56,7 @@ from .const import (
     CONF_WINDOW_SENSORS,
     DEFAULT_AC_COOL_DEADBAND,
     DEFAULT_FROST_TEMP,
+    DEFAULT_HYSTERESIS_OFF,
     DEFAULT_HYSTERESIS_ON,
     DEFAULT_MASTER_BOOST_OFFSET,
     DEFAULT_MASTER_BOOST_TEMP,
@@ -118,7 +119,10 @@ class HAHeatingRoomClimate(CoordinatorEntity[HAHeatingCoordinator], RestoreEntit
         super().__init__(coordinator)
         self.hass = hass
         self.entry = entry
-        self._config = entry.data
+        merged_cfg = dict(entry.data)
+        if getattr(entry, "options", None):
+            merged_cfg.update(dict(entry.options))
+        self._config = merged_cfg
         self._options = entry.options
 
         self._room_id = entry.entry_id
@@ -139,6 +143,12 @@ class HAHeatingRoomClimate(CoordinatorEntity[HAHeatingCoordinator], RestoreEntit
         self._ac_entity: str | None = self._config.get(CONF_AC_ENTITY)
         self._room_temp_sensor: str | None = self._config.get(CONF_ROOM_TEMP_SENSOR)
         self._window_sensors: list[str] = self._config.get(CONF_WINDOW_SENSORS, [])
+        self._window_open_delay: int = int(
+            self._config.get(CONF_WINDOW_OPEN_DELAY, DEFAULT_WINDOW_OPEN_DELAY)
+        )
+        self._window_close_delay: int = int(
+            self._config.get(CONF_WINDOW_CLOSE_DELAY, DEFAULT_WINDOW_CLOSE_DELAY)
+        )
 
         # Master Thermostat coupling
         self._master_entity: str | None = self._config.get(CONF_MASTER_THERMOSTAT)
@@ -221,6 +231,11 @@ class HAHeatingRoomClimate(CoordinatorEntity[HAHeatingCoordinator], RestoreEntit
         self._action_summary = "Initialized"
         self._demand_active = False
 
+        # State tracking for command deduplication and schedule transitions
+        self._last_commanded_trv_temps: dict[str, float] = {}
+        self._last_commanded_ac_state: tuple[str, float | None] | None = None
+        self._last_active_week: str | None = None
+
     async def async_added_to_hass(self) -> None:
         """Register listeners for external entities and restore previous state."""
         await super().async_added_to_hass()
@@ -280,7 +295,8 @@ class HAHeatingRoomClimate(CoordinatorEntity[HAHeatingCoordinator], RestoreEntit
             )
 
         # Initial checks
-        self._check_window_sensors_offline()
+        if self._window_sensors:
+            self._handle_window_sensor_update()
         await self._async_evaluate()
 
     @callback
@@ -294,6 +310,32 @@ class HAHeatingRoomClimate(CoordinatorEntity[HAHeatingCoordinator], RestoreEntit
         entity_id = event.data.get("entity_id")
         if entity_id in self._window_sensors:
             self._handle_window_sensor_update()
+        elif entity_id in (self._schedule_week_a, self._schedule_week_b):
+            coord_data = self.coordinator.data or {}
+            active_week = coord_data.get("active_week", "week_a")
+            active_sched = (
+                self._schedule_week_a
+                if active_week == "week_a"
+                else self._schedule_week_b
+            )
+            if entity_id == active_sched and self._attr_preset_mode not in (
+                PRESET_AWAY,
+                PRESET_HOLIDAY,
+            ):
+                st = self.hass.states.get(entity_id)
+                if st and st.state in ("on", "off"):
+                    new_preset = PRESET_COMFORT if st.state == "on" else PRESET_ECO
+                    if self._attr_preset_mode != new_preset:
+                        self._attr_preset_mode = new_preset
+                        self._manual_override_temp = None
+                        self._manual_override_until = None
+                        _LOGGER.info(
+                            "Room '%s': Schedule '%s' changed to '%s' -> switching preset to '%s'",
+                            self._room_name,
+                            entity_id,
+                            st.state,
+                            new_preset,
+                        )
         self.hass.async_create_task(self._async_evaluate())
 
     def _check_window_sensors_offline(self) -> None:
@@ -330,6 +372,8 @@ class HAHeatingRoomClimate(CoordinatorEntity[HAHeatingCoordinator], RestoreEntit
             any_window_open=any_open,
             loop=self.hass.loop,
             on_state_change=_on_window_state_changed,
+            open_delay_sec=self._window_open_delay,
+            close_delay_sec=self._window_close_delay,
         )
 
     async def async_set_temperature(self, **kwargs: Any) -> None:
@@ -340,7 +384,7 @@ class HAHeatingRoomClimate(CoordinatorEntity[HAHeatingCoordinator], RestoreEntit
         self._manual_override_temp = float(temp)
         # Override valid for 2 hours by default
         self._manual_override_until = datetime.now() + timedelta(hours=2)
-        _LOGGER.info("Room '%s': Manual override set to %.1f°C", self._attr_name, temp)
+        _LOGGER.info("Room '%s': Manual override set to %.1f°C", self._room_name, temp)
         await self._async_evaluate()
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
@@ -385,7 +429,11 @@ class HAHeatingRoomClimate(CoordinatorEntity[HAHeatingCoordinator], RestoreEntit
             self._room_id
         )
 
-        # 3. Resolve target temperature
+        # 3. Resolve target temperature & handle expired overrides / week cycle transitions
+        if self._manual_override_until is not None and now >= self._manual_override_until:
+            self._manual_override_temp = None
+            self._manual_override_until = None
+
         coord_data = self.coordinator.data or {}
         active_week = coord_data.get("active_week", "week_a")
         is_vacation = coord_data.get("is_vacation", False)
@@ -401,6 +449,17 @@ class HAHeatingRoomClimate(CoordinatorEntity[HAHeatingCoordinator], RestoreEntit
             else None
         )
 
+        if self._last_active_week is not None and active_week != self._last_active_week:
+            active_sched_st = sched_a_st if active_week == "week_a" else sched_b_st
+            if active_sched_st in ("on", "off") and self._attr_preset_mode in (
+                PRESET_COMFORT,
+                PRESET_ECO,
+            ):
+                self._attr_preset_mode = (
+                    PRESET_COMFORT if active_sched_st == "on" else PRESET_ECO
+                )
+        self._last_active_week = active_week
+
         target_temp, reason = self.coordinator.scheduler.resolve_target_temperature(
             current_dt=now,
             preset_mode=self._attr_preset_mode,
@@ -415,22 +474,32 @@ class HAHeatingRoomClimate(CoordinatorEntity[HAHeatingCoordinator], RestoreEntit
         self._attr_target_temperature = target_temp
         self._reason = reason
 
-        # 4. Determine heat demand
+        # 4. Determine heat demand (with Schmitt-trigger hysteresis)
         needs_heat = False
         needs_cool = False
+        was_heating = self._attr_hvac_action == HVACAction.HEATING
+        was_cooling = self._attr_hvac_action == HVACAction.COOLING
 
         if self._attr_hvac_mode != HVACMode.OFF and not is_window_paused:
             if self._attr_current_temperature is not None:
-                if (
-                    self._attr_target_temperature - self._attr_current_temperature
-                    >= DEFAULT_HYSTERESIS_ON
-                ):
+                temp_deficit = round(
+                    self._attr_target_temperature - self._attr_current_temperature, 2
+                )
+                temp_surplus = round(
+                    self._attr_current_temperature - self._attr_target_temperature, 2
+                )
+
+                if temp_deficit >= DEFAULT_HYSTERESIS_ON:
+                    needs_heat = True
+                elif was_heating and temp_deficit > DEFAULT_HYSTERESIS_OFF:
                     needs_heat = True
                 elif (
                     self._ac_entity
                     and self._attr_hvac_mode == HVACMode.COOL
-                    and (self._attr_current_temperature - self._attr_target_temperature)
-                    >= DEFAULT_AC_COOL_DEADBAND
+                    and (
+                        temp_surplus >= DEFAULT_AC_COOL_DEADBAND
+                        or (was_cooling and temp_surplus > DEFAULT_HYSTERESIS_OFF)
+                    )
                 ):
                     needs_cool = True
 
@@ -443,10 +512,16 @@ class HAHeatingRoomClimate(CoordinatorEntity[HAHeatingCoordinator], RestoreEntit
             self._demand_reason = "Geen actuele temperatuurmeting beschikbaar"
         elif needs_heat:
             diff = round(self._attr_target_temperature - self._attr_current_temperature, 1)
-            self._demand_reason = (
-                f"Warmtevraag actief: actueel {self._attr_current_temperature}°C < doel {self._attr_target_temperature}°C "
-                f"(verschil {diff}°C >= drempel {DEFAULT_HYSTERESIS_ON}°C)"
-            )
+            if diff >= DEFAULT_HYSTERESIS_ON:
+                self._demand_reason = (
+                    f"Warmtevraag actief: actueel {self._attr_current_temperature}°C < doel {self._attr_target_temperature}°C "
+                    f"(verschil {diff}°C >= drempel {DEFAULT_HYSTERESIS_ON}°C)"
+                )
+            else:
+                self._demand_reason = (
+                    f"Warmtevraag actief (hysterese): verwarmen loopt door tot {self._attr_target_temperature}°C "
+                    f"(actueel {self._attr_current_temperature}°C, nog {diff}°C te gaan)"
+                )
         elif needs_cool:
             diff = round(self._attr_current_temperature - self._attr_target_temperature, 1)
             self._demand_reason = (
@@ -578,8 +653,25 @@ class HAHeatingRoomClimate(CoordinatorEntity[HAHeatingCoordinator], RestoreEntit
         return None
 
     async def _set_trvs(self, temp: float) -> None:
-        """Command all TRVs in this room to the desired temperature."""
+        """Command all TRVs in this room to the desired temperature if not already set."""
         for trv in self._trvs:
+            st = self.hass.states.get(trv)
+            if (
+                st is not None
+                and isinstance(st.state, str)
+                and st.state not in ("unavailable", "unknown")
+            ):
+                curr_target = st.attributes.get("temperature") if st.attributes else None
+                if isinstance(curr_target, (int, float, str)):
+                    try:
+                        if abs(float(curr_target) - temp) < 0.05:
+                            self._last_commanded_trv_temps[trv] = temp
+                            continue
+                    except (ValueError, TypeError):
+                        pass
+            elif self._last_commanded_trv_temps.get(trv) == temp:
+                continue
+
             try:
                 await self.hass.services.async_call(
                     "climate",
@@ -587,13 +679,38 @@ class HAHeatingRoomClimate(CoordinatorEntity[HAHeatingCoordinator], RestoreEntit
                     {"entity_id": trv, "temperature": temp},
                     blocking=False,
                 )
+                self._last_commanded_trv_temps[trv] = temp
             except Exception as err:
                 _LOGGER.error("Failed to set temperature for TRV '%s': %s", trv, err)
 
     async def _set_ac(self, mode: HVACMode, temp: float | None = None) -> None:
-        """Command the room AC unit."""
+        """Command the room AC unit if state or target temperature differs."""
         if not self._ac_entity:
             return
+
+        mode_val = mode.value if hasattr(mode, "value") else str(mode)
+        target_key = (mode_val, round(temp, 1) if temp is not None else None)
+
+        st = self.hass.states.get(self._ac_entity)
+        if (
+            st is not None
+            and isinstance(st.state, str)
+            and st.state not in ("unavailable", "unknown")
+        ):
+            if st.state == mode_val:
+                if mode == HVACMode.OFF:
+                    self._last_commanded_ac_state = target_key
+                    return
+                curr_target = st.attributes.get("temperature") if st.attributes else None
+                if temp is None or (
+                    isinstance(curr_target, (int, float, str))
+                    and abs(float(curr_target) - temp) < 0.05
+                ):
+                    self._last_commanded_ac_state = target_key
+                    return
+        elif self._last_commanded_ac_state == target_key:
+            return
+
         try:
             if mode == HVACMode.OFF:
                 await self.hass.services.async_call(
@@ -615,6 +732,7 @@ class HAHeatingRoomClimate(CoordinatorEntity[HAHeatingCoordinator], RestoreEntit
                     data,
                     blocking=False,
                 )
+            self._last_commanded_ac_state = target_key
         except Exception as err:
             _LOGGER.error("Failed to set AC unit '%s': %s", self._ac_entity, err)
 

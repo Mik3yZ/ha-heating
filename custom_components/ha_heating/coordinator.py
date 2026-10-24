@@ -74,7 +74,10 @@ class HAHeatingCoordinator(DataUpdateCoordinator[dict]):
                 self.config_entry = entry
 
         self.hass = hass
-        self.hub_config = dict(hub_config)
+        merged_config = dict(hub_config)
+        if entry is not None and getattr(entry, "options", None):
+            merged_config.update(dict(entry.options))
+        self.hub_config = merged_config
 
         # Core logic engines
         self.arbitrage = EnergyArbitrage()
@@ -106,11 +109,11 @@ class HAHeatingCoordinator(DataUpdateCoordinator[dict]):
         _LOGGER.info("HA Heating Master Switch changed to: %s", "AAN" if enabled else "UIT")
 
         if not enabled:
-            # Clear all calls for heat across all master thermostats immediately
+            # Clear all calls for heat across all master thermostats immediately (bypass anti-cycling)
             now = datetime.now()
             for ctrl in self.master_controllers.values():
                 for room_id in list(ctrl.active_demanding_rooms):
-                    await ctrl.update_room_demand(room_id, False, now)
+                    await ctrl.update_room_demand(room_id, False, now, force=True)
 
         self.async_update_listeners()
 

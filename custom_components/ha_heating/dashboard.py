@@ -64,8 +64,9 @@ def generate_dashboard_yaml(
         "# HA Heating - Modern Lovelace Dashboard",
         "# Gebaseerd op jouw actieve HA Heating configuratie & entiteiten",
         "#",
-        "# Tip: Installeer 'Mushroom' via HACS (HACS > Frontend > Mushroom)",
-        "# voor de optimale moderne kaartweergave.",
+        "# Aanbevolen HACS uitbreidingen:",
+        "# 1. Mushroom (HACS > Frontend > Mushroom)",
+        "# 2. Stack In Card (HACS > Frontend > Stack In Card) - voor strakke groepering en randen per kamer",
         "",
         "title: HA Heating Klimaat",
         "icon: mdi:home-thermometer",
@@ -94,7 +95,9 @@ def generate_dashboard_yaml(
         f"            entity: {arbitrage_sensor}",
         "            icon: mdi:scale-balance",
         "            icon_color: amber",
-        f"            content: \"{{{{ states('{arbitrage_sensor}') }}}}\"",
+        f"            content: \"{{{{ 'Airco voordeliger' if 'Airco is cheaper' in states('{arbitrage_sensor}') or 'Airco' in states('{arbitrage_sensor}') else ('Gas voordeliger' if 'Gas' in states('{arbitrage_sensor}') else states('{arbitrage_sensor}')) }}}}\"",
+        "            tap_action:",
+        "              action: more-info",
         "          - type: template",
         f"            entity: {cop_sensor}",
         "            icon: mdi:heat-pump-outline",
@@ -103,148 +106,138 @@ def generate_dashboard_yaml(
         "",
     ]
 
-    # Group rooms by Area
+    # Kamers gegroepeerd als individuele custom:stack-in-card componenten
     if rooms:
-        areas: dict[str, list[dict[str, Any]]] = {}
         for room in rooms:
-            aname = room.get("area_name") or room.get("name") or "Kamers"
-            areas.setdefault(aname, []).append(room)
+            rname = room.get("name", "Kamer")
+            aname = room.get("area_name")
+            climate_id = room.get("climate_id")
+            trvs = room.get("trvs", [])
+            windows = room.get("windows", [])
+            ac_entity = room.get("ac_entity")
 
-        for aname, area_rooms in areas.items():
+            hvac_modes = ["heat", '"off"']
+            if ac_entity:
+                hvac_modes.append("cool")
+
+            if aname and aname.lower() != rname.lower():
+                lines.append(f"      # Kamer: {rname} ({aname})")
+            else:
+                lines.append(f"      # Kamer: {rname}")
+
             lines.extend([
-                f"      # --- Ruimte Groep: {aname} ---",
-                "      - type: custom:mushroom-title-card",
-                f"        title: \"{aname}\"",
+                "      - type: custom:stack-in-card",
+                "        mode: vertical",
+                "        cards:",
+                "          - type: custom:mushroom-climate-card",
+                f"            entity: {climate_id}",
+                f"            name: \"{rname}\"",
+                "            icon: mdi:radiator",
+                "            show_temperature_control: true",
+                "            collapsible_controls: false",
+                "            hvac_modes:",
+            ])
+            for m in hvac_modes:
+                lines.append(f"              - {m}")
+
+            # Preset buttons chips row
+            lines.extend([
+                "          # Snelle Preset Knoppen",
+                "          - type: custom:mushroom-chips-card",
+                "            alignment: center",
+                "            chips:",
+                "              - type: template",
+                "                icon: mdi:fire",
+                f"                icon_color: \"{{{{ 'red' if is_state_attr('{climate_id}', 'preset_mode', 'comfort') else 'grey' }}}}\"",
+                "                content: \"Comfort\"",
+                "                tap_action:",
+                "                  action: call-service",
+                "                  service: climate.set_preset_mode",
+                "                  target:",
+                f"                    entity_id: {climate_id}",
+                "                  data:",
+                "                    preset_mode: comfort",
+                "              - type: template",
+                "                icon: mdi:leaf",
+                f"                icon_color: \"{{{{ 'green' if is_state_attr('{climate_id}', 'preset_mode', 'eco') else 'grey' }}}}\"",
+                "                content: \"Eco\"",
+                "                tap_action:",
+                "                  action: call-service",
+                "                  service: climate.set_preset_mode",
+                "                  target:",
+                f"                    entity_id: {climate_id}",
+                "                  data:",
+                "                    preset_mode: eco",
+                "              - type: template",
+                "                icon: mdi:bed",
+                f"                icon_color: \"{{{{ 'purple' if is_state_attr('{climate_id}', 'preset_mode', 'sleep') else 'grey' }}}}\"",
+                "                content: \"Slaap\"",
+                "                tap_action:",
+                "                  action: call-service",
+                "                  service: climate.set_preset_mode",
+                "                  target:",
+                f"                    entity_id: {climate_id}",
+                "                  data:",
+                "                    preset_mode: sleep",
+                "              - type: template",
+                "                icon: mdi:home-export-outline",
+                f"                icon_color: \"{{{{ 'blue' if is_state_attr('{climate_id}', 'preset_mode', 'away') else 'grey' }}}}\"",
+                "                content: \"Afwezig\"",
+                "                tap_action:",
+                "                  action: call-service",
+                "                  service: climate.set_preset_mode",
+                "                  target:",
+                f"                    entity_id: {climate_id}",
+                "                  data:",
+                "                    preset_mode: away",
+                "              - type: template",
+                "                icon: mdi:rocket-launch",
+                f"                icon_color: \"{{{{ 'deep-orange' if is_state_attr('{climate_id}', 'preset_mode', 'boost') else 'grey' }}}}\"",
+                "                content: \"Boost\"",
+                "                tap_action:",
+                "                  action: call-service",
+                "                  service: climate.set_preset_mode",
+                "                  target:",
+                f"                    entity_id: {climate_id}",
+                "                  data:",
+                "                    preset_mode: boost",
                 "",
+                "          # Status & Componenten",
+                "          - type: custom:mushroom-chips-card",
+                "            alignment: center",
+                "            chips:",
+                "              - type: template",
+                f"                icon: \"{{{{ 'mdi:fire' if is_state_attr('{climate_id}', 'active_heat_source', 'gas') else ('mdi:snowflake' if is_state_attr('{climate_id}', 'active_heat_source', 'ac_cool') else ('mdi:heat-pump-outline' if is_state_attr('{climate_id}', 'active_heat_source', 'ac_heat') else ('mdi:window-open-variant' if is_state_attr('{climate_id}', 'active_heat_source', 'window_open') else 'mdi:power-sleep'))) }}}}\"",
+                f"                icon_color: \"{{{{ 'red' if is_state_attr('{climate_id}', 'active_heat_source', 'gas') else ('blue' if is_state_attr('{climate_id}', 'active_heat_source', 'ac_cool') else ('orange' if is_state_attr('{climate_id}', 'active_heat_source', 'ac_heat') else 'grey')) }}}}\"",
+                f"                content: \"{{{{ state_attr('{climate_id}', 'resolution_reason') | default('Rust') }}}}\"",
             ])
 
-            for room in area_rooms:
-                rname = room.get("name", "Kamer")
-                climate_id = room.get("climate_id")
-                trvs = room.get("trvs", [])
-                windows = room.get("windows", [])
-                ac_entity = room.get("ac_entity")
-
-                hvac_modes = ["heat", '"off"']
-                if ac_entity:
-                    hvac_modes.append("cool")
-
+            for win in windows:
                 lines.extend([
-                    f"      # Kamer: {rname}",
-                    "      - type: vertical-stack",
-                    "        cards:",
-                    "          - type: custom:mushroom-climate-card",
-                    f"            entity: {climate_id}",
-                    f"            name: \"{rname}\"",
-                    "            icon: mdi:radiator",
-                    "            show_temperature_control: true",
-                    "            collapsible_controls: false",
-                    "            hvac_modes:",
-                ])
-                for m in hvac_modes:
-                    lines.append(f"              - {m}")
-
-                # Preset buttons chips row
-                lines.extend([
-                    "          # Snelle Preset Knoppen",
-                    "          - type: custom:mushroom-chips-card",
-                    "            alignment: center",
-                    "            chips:",
                     "              - type: template",
-                    "                icon: mdi:fire",
-                    f"                icon_color: \"{{{{ 'red' if is_state_attr('{climate_id}', 'preset_mode', 'comfort') else 'grey' }}}}\"",
-                    "                content: \"Comfort\"",
-                    "                tap_action:",
-                    "                  action: call-service",
-                    "                  service: climate.set_preset_mode",
-                    "                  target:",
-                    f"                    entity_id: {climate_id}",
-                    "                  data:",
-                    "                    preset_mode: comfort",
-                    "              - type: template",
-                    "                icon: mdi:leaf",
-                    f"                icon_color: \"{{{{ 'green' if is_state_attr('{climate_id}', 'preset_mode', 'eco') else 'grey' }}}}\"",
-                    "                content: \"Eco\"",
-                    "                tap_action:",
-                    "                  action: call-service",
-                    "                  service: climate.set_preset_mode",
-                    "                  target:",
-                    f"                    entity_id: {climate_id}",
-                    "                  data:",
-                    "                    preset_mode: eco",
-                    "              - type: template",
-                    "                icon: mdi:bed",
-                    f"                icon_color: \"{{{{ 'purple' if is_state_attr('{climate_id}', 'preset_mode', 'sleep') else 'grey' }}}}\"",
-                    "                content: \"Slaap\"",
-                    "                tap_action:",
-                    "                  action: call-service",
-                    "                  service: climate.set_preset_mode",
-                    "                  target:",
-                    f"                    entity_id: {climate_id}",
-                    "                  data:",
-                    "                    preset_mode: sleep",
-                    "              - type: template",
-                    "                icon: mdi:home-export-outline",
-                    f"                icon_color: \"{{{{ 'blue' if is_state_attr('{climate_id}', 'preset_mode', 'away') else 'grey' }}}}\"",
-                    "                content: \"Afwezig\"",
-                    "                tap_action:",
-                    "                  action: call-service",
-                    "                  service: climate.set_preset_mode",
-                    "                  target:",
-                    f"                    entity_id: {climate_id}",
-                    "                  data:",
-                    "                    preset_mode: away",
-                    "              - type: template",
-                    "                icon: mdi:rocket-launch",
-                    f"                icon_color: \"{{{{ 'deep-orange' if is_state_attr('{climate_id}', 'preset_mode', 'boost') else 'grey' }}}}\"",
-                    "                content: \"Boost\"",
-                    "                tap_action:",
-                    "                  action: call-service",
-                    "                  service: climate.set_preset_mode",
-                    "                  target:",
-                    f"                    entity_id: {climate_id}",
-                    "                  data:",
-                    "                    preset_mode: boost",
+                    f"                entity: {win}",
+                    f"                icon: \"{{{{ 'mdi:window-open-variant' if is_state('{win}', 'on') else ('mdi:alert-circle' if states('{win}') in ['unavailable', 'unknown'] else 'mdi:window-closed-variant') }}}}\"",
+                    f"                icon_color: \"{{{{ 'amber' if is_state('{win}', 'on') else ('red' if states('{win}') in ['unavailable', 'unknown'] else 'green') }}}}\"",
+                    f"                content: \"{{{{ 'Raam open' if is_state('{win}', 'on') else ('Offline!' if states('{win}') in ['unavailable', 'unknown'] else 'Dicht') }}}}\"",
                 ])
 
-                # Secondary chips for status, windows and TRVs
+            for trv in trvs:
                 lines.extend([
-                    "          # Status & Componenten",
-                    "          - type: custom:mushroom-chips-card",
-                    "            alignment: start",
-                    "            chips:",
-                    "              - type: template",
-                    f"                icon: \"{{{{ 'mdi:fire' if is_state_attr('{climate_id}', 'active_heat_source', 'gas') else ('mdi:snowflake' if is_state_attr('{climate_id}', 'active_heat_source', 'ac_cool') else ('mdi:heat-pump-outline' if is_state_attr('{climate_id}', 'active_heat_source', 'ac_heat') else ('mdi:window-open-variant' if is_state_attr('{climate_id}', 'active_heat_source', 'window_open') else 'mdi:power-sleep'))) }}}}\"",
-                    f"                icon_color: \"{{{{ 'red' if is_state_attr('{climate_id}', 'active_heat_source', 'gas') else ('blue' if is_state_attr('{climate_id}', 'active_heat_source', 'ac_cool') else ('orange' if is_state_attr('{climate_id}', 'active_heat_source', 'ac_heat') else 'grey')) }}}}\"",
-                    f"                content: \"{{{{ state_attr('{climate_id}', 'resolution_reason') | default('Rust') }}}}\"",
+                    "              - type: entity",
+                    f"                entity: {trv}",
+                    "                name: \"Kraan\"",
+                    "                icon: mdi:radiator",
                 ])
 
-                for win in windows:
-                    lines.extend([
-                        "              - type: template",
-                        f"                entity: {win}",
-                        f"                icon: \"{{{{ 'mdi:window-open-variant' if is_state('{win}', 'on') else ('mdi:alert-circle' if states('{win}') in ['unavailable', 'unknown'] else 'mdi:window-closed-variant') }}}}\"",
-                        f"                icon_color: \"{{{{ 'amber' if is_state('{win}', 'on') else ('red' if states('{win}') in ['unavailable', 'unknown'] else 'green') }}}}\"",
-                        f"                content: \"{{{{ 'Raam open' if is_state('{win}', 'on') else ('Offline!' if states('{win}') in ['unavailable', 'unknown'] else 'Dicht') }}}}\"",
-                    ])
+            if ac_entity:
+                lines.extend([
+                    "              - type: entity",
+                    f"                entity: {ac_entity}",
+                    "                name: \"Airco\"",
+                    "                icon: mdi:air-conditioner",
+                ])
 
-                for trv in trvs:
-                    lines.extend([
-                        "              - type: entity",
-                        f"                entity: {trv}",
-                        "                name: \"Kraan\"",
-                        "                icon: mdi:radiator",
-                    ])
-
-                if ac_entity:
-                    lines.extend([
-                        "              - type: entity",
-                        f"                entity: {ac_entity}",
-                        "                name: \"Airco\"",
-                        "                icon: mdi:air-conditioner",
-                    ])
-
-                lines.append("")
+            lines.append("")
     else:
         lines.extend([
             "      # Geen kamers geconfigureerd",
@@ -260,11 +253,12 @@ def generate_dashboard_yaml(
     if masters:
         lines.extend([
             "      # Master Thermostaten (Ketelkoppeling)",
-            "      - type: custom:mushroom-title-card",
-            "        title: \"Centrale Verwarming\"",
-            "        subtitle: \"Master Thermostaat (Vraaggestuurd)\"",
-            "      - type: vertical-stack",
+            "      - type: custom:stack-in-card",
+            "        mode: vertical",
             "        cards:",
+            "          - type: custom:mushroom-title-card",
+            "            title: \"Centrale Verwarming\"",
+            "            subtitle: \"Master Thermostaat (Vraaggestuurd)\"",
         ])
         for m in masters:
             lines.extend([
@@ -485,7 +479,9 @@ async def async_generate_dashboard(hass: HomeAssistant) -> str:
 
     if hub_entries:
         hub_entry = hub_entries[0]
-        hub_data = hub_entry.data
+        hub_data = dict(hub_entry.data)
+        if getattr(hub_entry, "options", None):
+            hub_data.update(dict(hub_entry.options))
 
         # Map actual entity IDs from Entity Registry for the hub
         registered_entities = er.async_entries_for_config_entry(
@@ -510,7 +506,9 @@ async def async_generate_dashboard(hass: HomeAssistant) -> str:
     masters: list[str] = []
 
     for rentry in room_entries:
-        rdata = rentry.data
+        rdata = dict(rentry.data)
+        if getattr(rentry, "options", None):
+            rdata.update(dict(rentry.options))
         rname = rdata.get(CONF_ROOM_NAME) or rentry.title
         area_id = rdata.get(CONF_AREA_ID)
         area_name = None
@@ -550,26 +548,38 @@ async def async_generate_dashboard(hass: HomeAssistant) -> str:
 
     yaml_content = generate_dashboard_yaml(hub_data, hub_sensors, rooms, masters)
 
-    # Save to /config/lovelace/ha_heating_dashboard.yaml
-    try:
-        config_dir = Path(getattr(hass.config, "config_dir", "/config"))
-        lovelace_dir = config_dir / "lovelace"
-        lovelace_dir.mkdir(parents=True, exist_ok=True)
-        target_path = lovelace_dir / "ha_heating_dashboard.yaml"
-
-        existing_content = None
-        if target_path.exists():
+    # Save to /config/lovelace/ha_heating_dashboard.yaml (using executor to avoid blocking event loop)
+    def _sync_write_dashboard(target: Path, content: str) -> bool:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        existing = None
+        if target.exists():
             try:
-                existing_content = target_path.read_text(encoding="utf-8")
+                existing = target.read_text(encoding="utf-8")
             except Exception as err:
                 _LOGGER.debug("Could not read existing dashboard file: %s", err)
+        if existing is not None and existing.strip() == content.strip():
+            return False
+        target.write_text(content, encoding="utf-8")
+        return True
 
-        # Only proceed with writing and notification if content has actually changed
-        if existing_content is not None and existing_content.strip() == yaml_content.strip():
+    try:
+        config_dir = Path(getattr(hass.config, "config_dir", "/config"))
+        target_path = config_dir / "lovelace" / "ha_heating_dashboard.yaml"
+
+        changed = False
+        if hasattr(hass, "async_add_executor_job"):
+            res = hass.async_add_executor_job(_sync_write_dashboard, target_path, yaml_content)
+            if hasattr(res, "__await__"):
+                changed = await res
+            else:
+                changed = _sync_write_dashboard(target_path, yaml_content)
+        else:
+            changed = _sync_write_dashboard(target_path, yaml_content)
+
+        if not changed:
             _LOGGER.debug("Dashboard YAML unchanged; skipping file write and notification")
             return yaml_content
 
-        target_path.write_text(yaml_content, encoding="utf-8")
         _LOGGER.info("Wrote generated dashboard to %s", target_path)
 
         # Notify user in Home Assistant without full YAML dump

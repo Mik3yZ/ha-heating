@@ -117,17 +117,15 @@ class HeatingScheduler:
             holiday_temp = preset_temps.get(PRESET_HOLIDAY, 15.0)
             return holiday_temp, "Vacation calendar event active"
 
-        # 3. Explicit preset mode requested by user (e.g. Boost, Away, Sleep)
+        # 3. Explicit preset mode requested by user (e.g. Boost, Away, Sleep, Holiday)
+        if preset_mode == PRESET_HOLIDAY:
+            return preset_temps.get(PRESET_HOLIDAY, 15.0), "Preset: Holiday"
         if preset_mode == PRESET_BOOST:
             return preset_temps.get(PRESET_BOOST, 22.0), "Preset: Boost"
         if preset_mode == PRESET_AWAY:
             return preset_temps.get(PRESET_AWAY, 15.0), "Preset: Away"
         if preset_mode == PRESET_SLEEP:
             return preset_temps.get(PRESET_SLEEP, 16.0), "Preset: Sleep"
-        if preset_mode == PRESET_ECO:
-            return preset_temps.get(PRESET_ECO, 18.0), "Preset: Eco"
-        if preset_mode == PRESET_COMFORT:
-            return preset_temps.get(PRESET_COMFORT, 20.5), "Preset: Comfort"
 
         # 4. Schedule-based determination according to active week
         active_schedule_state = (
@@ -138,9 +136,20 @@ class HeatingScheduler:
         eco_temp = preset_temps.get(PRESET_ECO, 18.0)
 
         if active_schedule_state is not None:
-            if active_schedule_state.lower() == "on":
+            sched_is_on = active_schedule_state.lower() == "on"
+            if preset_mode == PRESET_ECO and not sched_is_on:
+                return eco_temp, f"Schedule ({active_week.upper()}): Eco"
+            if preset_mode == PRESET_COMFORT and sched_is_on:
                 return comfort_temp, f"Schedule ({active_week.upper()}): Comfort"
-            return eco_temp, f"Schedule ({active_week.upper()}): Eco"
+            if preset_mode is None:
+                if sched_is_on:
+                    return comfort_temp, f"Schedule ({active_week.upper()}): Comfort"
+                return eco_temp, f"Schedule ({active_week.upper()}): Eco"
+
+        if preset_mode == PRESET_ECO:
+            return eco_temp, "Preset: Eco"
+        if preset_mode == PRESET_COMFORT:
+            return comfort_temp, "Preset: Comfort"
 
         # 5. Default fallback if no schedule helper attached
         return comfort_temp, "Default comfort setpoint"

@@ -70,14 +70,51 @@
     "step": {
       "init": {
         "title": "Opties Aanpassen",
-        "description": "Pas de instellingen van deze kamer of centraal systeem aan."
+        "description": "Pas de instellingen van deze kamer of centraal systeem aan.",
+        "data": {
+          "gas_price_sensor": "Gasprijs sensor (€/m³)",
+          "electric_price_sensor": "Stroomprijs sensor (€/kWh)",
+          "outdoor_temp_sensor": "Buitentemperatuur sensor",
+          "solar_export_sensor": "Zonne-energie overschot sensor (optioneel)",
+          "vacation_calendar": "Vakantie kalender entiteit (optioneel)",
+          "calendar_filter": "Kalender filter trefwoord (bijv. Vakantie)",
+          "cycle_type": "Type 2-wekelijkse cyclus",
+          "cycle_anchor_date": "Ankerdatum (bij 14-daagse cyclus, YYYY-MM-DD)",
+          "cycle_entity": "Sensor of Helper voor weekstatus (optioneel)",
+          "notify_sensor_offline": "Melding sturen als een raamsensor offline of niet beschikbaar is",
+          "notify_persistent": "Melding tonen in Home Assistant (Notificatiepaneel)",
+          "notify_service": "Mobiele meldingsservice (bijv. notify.notify of notify.mobile_app_telefoon)",
+          "area_id": "Kamer (Home Assistant Ruimte)",
+          "room_name": "Aangepaste weergavenaam (optioneel)",
+          "room_temp_sensor": "Kamertemperatuursensor (optioneel, anders gemiddelde van TRVs)",
+          "trvs": "Thermostaatkranen (TRVs)",
+          "window_sensors": "Raamsensoren (optioneel)",
+          "window_open_delay": "Raam open vertraging (seconden)",
+          "window_close_delay": "Raam sluiten herstelvertraging (seconden)",
+          "master_thermostat": "Gekoppelde Master-Thermostaat (optioneel)",
+          "master_control_mode": "Aansturingsmethode Master",
+          "master_boost_offset": "Master temperatuur verhoging bij vraag (+°C boven huidige temp)",
+          "master_idle_temp": "Master rusttemperatuur (°C)",
+          "ac_entity": "Airco klimaatentiteit (optioneel)",
+          "ac_quiet_start": "Airco stille tijd start (bijv. 22:00)",
+          "ac_quiet_end": "Airco stille tijd eind (bijv. 07:00)",
+          "ac_enable_cooling": "Automatisch koelen toestaan",
+          "schedule_week_a": "HA Schedule helper: Week A (optioneel)",
+          "schedule_week_b": "HA Schedule helper: Week B (optioneel)",
+          "temp_comfort": "Comfort temperatuur (°C)",
+          "temp_eco": "Eco temperatuur (°C)",
+          "temp_sleep": "Slaap/Nacht temperatuur (°C)",
+          "temp_away": "Afwezigheid temperatuur (°C)",
+          "temp_boost": "Boost temperatuur (°C)",
+          "temp_holiday": "Vakantie temperatuur (°C)"
+        }
       }
     }
   },
   "services": {
     "generate_dashboard": {
       "name": "Genereer Dashboard",
-      "description": "Haalt de actuele HA Heating configuratie op en genereert een kant-en-klaar Lovelace Dashboard op maat (/config/ha_heating_dashboard.yaml)."
+      "description": "Haalt de actuele HA Heating configuratie op en genereert een kant-en-klaar Lovelace Dashboard op maat (/config/lovelace/ha_heating_dashboard.yaml)."
     }
   }
 }
