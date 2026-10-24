@@ -24,7 +24,12 @@
           "cycle_entity": "Sensor or helper for week cycle (optional)",
           "notify_sensor_offline": "Send notification if a window sensor goes offline or unavailable",
           "notify_persistent": "Show notification in Home Assistant notifications panel",
-          "notify_service": "Mobile notification service (e.g. notify.notify or notify.mobile_app_phone)"
+          "notify_service": "Mobile notification service (e.g. notify.notify or notify.mobile_app_phone)",
+          "presence_entities": "Presence entities for Auto-Away (e.g. person.* or zone.home)",
+          "auto_away_delay_minutes": "Auto-Away delay when nobody is home (minutes)",
+          "solar_buffer_enabled": "Enable solar surplus & negative price thermal buffer",
+          "solar_buffer_threshold_watts": "Solar export threshold for pre-heating/cooling (Watts)",
+          "solar_buffer_offset": "Extra temperature buffer during free energy (+°C)"
         }
       },
       "room": {
@@ -46,6 +51,7 @@
           "ac_quiet_start": "AC quiet hours start (e.g. 22:00)",
           "ac_quiet_end": "AC quiet hours end (e.g. 07:00)",
           "ac_enable_cooling": "Enable automatic cooling",
+          "ac_temp_offset": "AC ceiling stratification offset when heating (+°C)",
           "schedule_week_a": "HA Schedule helper: Week A (optional)",
           "schedule_week_b": "HA Schedule helper: Week B (optional)",
           "temp_comfort": "Comfort temperature (°C)",
@@ -53,7 +59,9 @@
           "temp_sleep": "Sleep temperature (°C)",
           "temp_away": "Away temperature (°C)",
           "temp_boost": "Boost temperature (°C)",
-          "temp_holiday": "Holiday temperature (°C)"
+          "boost_duration_minutes": "Boost duration before automatic return (minutes)",
+          "temp_holiday": "Holiday temperature (°C)",
+          "valve_exercise_enabled": "Enable weekly anti-calcification TRV valve exercise"
         }
       }
     },
@@ -84,6 +92,11 @@
           "notify_sensor_offline": "Send notification if a window sensor goes offline or unavailable",
           "notify_persistent": "Show notification in Home Assistant notifications panel",
           "notify_service": "Mobile notification service (e.g. notify.notify or notify.mobile_app_phone)",
+          "presence_entities": "Presence entities for Auto-Away (e.g. person.* or zone.home)",
+          "auto_away_delay_minutes": "Auto-Away delay when nobody is home (minutes)",
+          "solar_buffer_enabled": "Enable solar surplus & negative price thermal buffer",
+          "solar_buffer_threshold_watts": "Solar export threshold for pre-heating/cooling (Watts)",
+          "solar_buffer_offset": "Extra temperature buffer during free energy (+°C)",
           "area_id": "Room (Home Assistant Area)",
           "room_name": "Custom display name (optional)",
           "room_temp_sensor": "Room temperature sensor (optional, defaults to TRV average)",
@@ -99,6 +112,7 @@
           "ac_quiet_start": "AC quiet hours start (e.g. 22:00)",
           "ac_quiet_end": "AC quiet hours end (e.g. 07:00)",
           "ac_enable_cooling": "Enable automatic cooling",
+          "ac_temp_offset": "AC ceiling stratification offset when heating (+°C)",
           "schedule_week_a": "HA Schedule helper: Week A (optional)",
           "schedule_week_b": "HA Schedule helper: Week B (optional)",
           "temp_comfort": "Comfort temperature (°C)",
@@ -106,7 +120,9 @@
           "temp_sleep": "Sleep temperature (°C)",
           "temp_away": "Away temperature (°C)",
           "temp_boost": "Boost temperature (°C)",
-          "temp_holiday": "Holiday temperature (°C)"
+          "boost_duration_minutes": "Boost duration before automatic return (minutes)",
+          "temp_holiday": "Holiday temperature (°C)",
+          "valve_exercise_enabled": "Enable weekly anti-calcification TRV valve exercise"
         }
       }
     }
@@ -118,4 +134,3 @@
     }
   }
 }
-

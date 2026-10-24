@@ -24,7 +24,10 @@ from .const import (
     CONF_AC_ENTITY,
     CONF_AC_QUIET_END,
     CONF_AC_QUIET_START,
+    CONF_AC_TEMP_OFFSET,
     CONF_AREA_ID,
+    CONF_AUTO_AWAY_DELAY_MINUTES,
+    CONF_BOOST_DURATION_MINUTES,
     CONF_CALENDAR_FILTER,
     CONF_CYCLE_ANCHOR_DATE,
     CONF_CYCLE_ENTITY,
@@ -41,10 +44,14 @@ from .const import (
     CONF_NOTIFY_SENSOR_OFFLINE,
     CONF_NOTIFY_SERVICE,
     CONF_OUTDOOR_TEMP_SENSOR,
+    CONF_PRESENCE_ENTITIES,
     CONF_ROOM_NAME,
     CONF_ROOM_TEMP_SENSOR,
     CONF_SCHEDULE_WEEK_A,
     CONF_SCHEDULE_WEEK_B,
+    CONF_SOLAR_BUFFER_ENABLED,
+    CONF_SOLAR_BUFFER_OFFSET,
+    CONF_SOLAR_BUFFER_THRESHOLD_WATTS,
     CONF_SOLAR_EXPORT_SENSOR,
     CONF_TEMP_AWAY,
     CONF_TEMP_BOOST,
@@ -54,24 +61,32 @@ from .const import (
     CONF_TEMP_SLEEP,
     CONF_TRVS,
     CONF_VACATION_CALENDAR,
+    CONF_VALVE_EXERCISE_ENABLED,
     CONF_WINDOW_CLOSE_DELAY,
     CONF_WINDOW_OPEN_DELAY,
     CONF_WINDOW_SENSORS,
     CYCLE_ANCHOR_DATE,
     CYCLE_EXTERNAL_ENTITY,
     CYCLE_ISO_EVEN_ODD,
+    DEFAULT_AC_TEMP_OFFSET,
+    DEFAULT_AUTO_AWAY_DELAY_MINUTES,
+    DEFAULT_BOOST_DURATION_MINUTES,
     DEFAULT_MASTER_BOOST_OFFSET,
     DEFAULT_MASTER_BOOST_TEMP,
     DEFAULT_MASTER_IDLE_TEMP,
     DEFAULT_NOTIFY_PERSISTENT,
     DEFAULT_NOTIFY_SENSOR_OFFLINE,
     DEFAULT_NOTIFY_SERVICE,
+    DEFAULT_SOLAR_BUFFER_ENABLED,
+    DEFAULT_SOLAR_BUFFER_OFFSET,
+    DEFAULT_SOLAR_BUFFER_THRESHOLD_WATTS,
     DEFAULT_TEMP_AWAY,
     DEFAULT_TEMP_BOOST,
     DEFAULT_TEMP_COMFORT,
     DEFAULT_TEMP_ECO,
     DEFAULT_TEMP_HOLIDAY,
     DEFAULT_TEMP_SLEEP,
+    DEFAULT_VALVE_EXERCISE_ENABLED,
     DEFAULT_WINDOW_CLOSE_DELAY,
     DEFAULT_WINDOW_OPEN_DELAY,
     DOMAIN,
@@ -165,6 +180,36 @@ class HAHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(
                     CONF_NOTIFY_SERVICE, default=DEFAULT_NOTIFY_SERVICE
                 ): selector.TextSelector(),
+                vol.Optional(CONF_PRESENCE_ENTITIES): selector.EntitySelector(
+                    selector.EntitySelectorConfig(
+                        domain=["person", "zone", "device_tracker", "binary_sensor"],
+                        multiple=True,
+                    )
+                ),
+                vol.Optional(
+                    CONF_AUTO_AWAY_DELAY_MINUTES,
+                    default=DEFAULT_AUTO_AWAY_DELAY_MINUTES,
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=0, max=180, step=5)
+                ),
+                vol.Optional(
+                    CONF_SOLAR_BUFFER_ENABLED, default=DEFAULT_SOLAR_BUFFER_ENABLED
+                ): selector.BooleanSelector(),
+                vol.Optional(
+                    CONF_SOLAR_BUFFER_THRESHOLD_WATTS,
+                    default=DEFAULT_SOLAR_BUFFER_THRESHOLD_WATTS,
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=100, max=5000, step=100, unit_of_measurement="W"
+                    )
+                ),
+                vol.Optional(
+                    CONF_SOLAR_BUFFER_OFFSET, default=DEFAULT_SOLAR_BUFFER_OFFSET
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0.5, max=3.0, step=0.5, unit_of_measurement="°C"
+                    )
+                ),
             }
         )
 
@@ -270,6 +315,13 @@ class HAHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(CONF_AC_QUIET_START, default="22:00"): selector.TextSelector(),
                 vol.Optional(CONF_AC_QUIET_END, default="07:00"): selector.TextSelector(),
                 vol.Optional(CONF_AC_ENABLE_COOLING, default=True): selector.BooleanSelector(),
+                vol.Optional(
+                    CONF_AC_TEMP_OFFSET, default=DEFAULT_AC_TEMP_OFFSET
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0.0, max=5.0, step=0.5, unit_of_measurement="°C"
+                    )
+                ),
                 vol.Optional(CONF_SCHEDULE_WEEK_A): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="schedule")
                 ),
@@ -291,9 +343,17 @@ class HAHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(CONF_TEMP_BOOST, default=DEFAULT_TEMP_BOOST): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=18, max=28, step=0.5)
                 ),
+                vol.Optional(
+                    CONF_BOOST_DURATION_MINUTES, default=DEFAULT_BOOST_DURATION_MINUTES
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=0, max=240, step=15)
+                ),
                 vol.Optional(CONF_TEMP_HOLIDAY, default=DEFAULT_TEMP_HOLIDAY): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=10, max=18, step=0.5)
                 ),
+                vol.Optional(
+                    CONF_VALVE_EXERCISE_ENABLED, default=DEFAULT_VALVE_EXERCISE_ENABLED
+                ): selector.BooleanSelector(),
             }
         )
 
@@ -403,6 +463,51 @@ class HAHeatingOptionsFlowHandler(config_entries.OptionsFlow):
                             CONF_NOTIFY_SERVICE, DEFAULT_NOTIFY_SERVICE
                         ),
                     ): selector.TextSelector(),
+                    vol.Optional(
+                        CONF_PRESENCE_ENTITIES,
+                        default=current_data.get(CONF_PRESENCE_ENTITIES, []),
+                    ): selector.EntitySelector(
+                        selector.EntitySelectorConfig(
+                            domain=["person", "zone", "device_tracker", "binary_sensor"],
+                            multiple=True,
+                        )
+                    ),
+                    vol.Optional(
+                        CONF_AUTO_AWAY_DELAY_MINUTES,
+                        default=current_data.get(
+                            CONF_AUTO_AWAY_DELAY_MINUTES,
+                            DEFAULT_AUTO_AWAY_DELAY_MINUTES,
+                        ),
+                    ): selector.NumberSelector(
+                        selector.NumberSelectorConfig(min=0, max=180, step=5)
+                    ),
+                    vol.Optional(
+                        CONF_SOLAR_BUFFER_ENABLED,
+                        default=current_data.get(
+                            CONF_SOLAR_BUFFER_ENABLED, DEFAULT_SOLAR_BUFFER_ENABLED
+                        ),
+                    ): selector.BooleanSelector(),
+                    vol.Optional(
+                        CONF_SOLAR_BUFFER_THRESHOLD_WATTS,
+                        default=current_data.get(
+                            CONF_SOLAR_BUFFER_THRESHOLD_WATTS,
+                            DEFAULT_SOLAR_BUFFER_THRESHOLD_WATTS,
+                        ),
+                    ): selector.NumberSelector(
+                        selector.NumberSelectorConfig(
+                            min=100, max=5000, step=100, unit_of_measurement="W"
+                        )
+                    ),
+                    vol.Optional(
+                        CONF_SOLAR_BUFFER_OFFSET,
+                        default=current_data.get(
+                            CONF_SOLAR_BUFFER_OFFSET, DEFAULT_SOLAR_BUFFER_OFFSET
+                        ),
+                    ): selector.NumberSelector(
+                        selector.NumberSelectorConfig(
+                            min=0.5, max=3.0, step=0.5, unit_of_measurement="°C"
+                        )
+                    ),
                 }
             )
         else:
@@ -498,6 +603,16 @@ class HAHeatingOptionsFlowHandler(config_entries.OptionsFlow):
                         default=current_data.get(CONF_AC_ENABLE_COOLING, True),
                     ): selector.BooleanSelector(),
                     vol.Optional(
+                        CONF_AC_TEMP_OFFSET,
+                        default=current_data.get(
+                            CONF_AC_TEMP_OFFSET, DEFAULT_AC_TEMP_OFFSET
+                        ),
+                    ): selector.NumberSelector(
+                        selector.NumberSelectorConfig(
+                            min=0.0, max=5.0, step=0.5, unit_of_measurement="°C"
+                        )
+                    ),
+                    vol.Optional(
                         CONF_SCHEDULE_WEEK_A,
                         description={"suggested_value": current_data.get(CONF_SCHEDULE_WEEK_A)},
                     ): selector.EntitySelector(selector.EntitySelectorConfig(domain="schedule")),
@@ -526,9 +641,23 @@ class HAHeatingOptionsFlowHandler(config_entries.OptionsFlow):
                         default=current_data.get(CONF_TEMP_BOOST, DEFAULT_TEMP_BOOST),
                     ): selector.NumberSelector(selector.NumberSelectorConfig(min=18, max=28, step=0.5)),
                     vol.Optional(
+                        CONF_BOOST_DURATION_MINUTES,
+                        default=current_data.get(
+                            CONF_BOOST_DURATION_MINUTES, DEFAULT_BOOST_DURATION_MINUTES
+                        ),
+                    ): selector.NumberSelector(
+                        selector.NumberSelectorConfig(min=0, max=240, step=15)
+                    ),
+                    vol.Optional(
                         CONF_TEMP_HOLIDAY,
                         default=current_data.get(CONF_TEMP_HOLIDAY, DEFAULT_TEMP_HOLIDAY),
                     ): selector.NumberSelector(selector.NumberSelectorConfig(min=10, max=18, step=0.5)),
+                    vol.Optional(
+                        CONF_VALVE_EXERCISE_ENABLED,
+                        default=current_data.get(
+                            CONF_VALVE_EXERCISE_ENABLED, DEFAULT_VALVE_EXERCISE_ENABLED
+                        ),
+                    ): selector.BooleanSelector(),
                 }
             )
 

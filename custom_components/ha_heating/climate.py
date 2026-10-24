@@ -33,7 +33,9 @@ from .const import (
     CONF_AC_ENTITY,
     CONF_AC_QUIET_END,
     CONF_AC_QUIET_START,
+    CONF_AC_TEMP_OFFSET,
     CONF_AREA_ID,
+    CONF_BOOST_DURATION_MINUTES,
     CONF_ENTRY_TYPE,
     CONF_MASTER_BOOST_OFFSET,
     CONF_MASTER_BOOST_TEMP,
@@ -51,22 +53,27 @@ from .const import (
     CONF_TEMP_HOLIDAY,
     CONF_TEMP_SLEEP,
     CONF_TRVS,
+    CONF_VALVE_EXERCISE_ENABLED,
     CONF_WINDOW_CLOSE_DELAY,
     CONF_WINDOW_OPEN_DELAY,
     CONF_WINDOW_SENSORS,
     DEFAULT_AC_COOL_DEADBAND,
+    DEFAULT_AC_TEMP_OFFSET,
+    DEFAULT_BOOST_DURATION_MINUTES,
     DEFAULT_FROST_TEMP,
     DEFAULT_HYSTERESIS_OFF,
     DEFAULT_HYSTERESIS_ON,
     DEFAULT_MASTER_BOOST_OFFSET,
     DEFAULT_MASTER_BOOST_TEMP,
     DEFAULT_MASTER_IDLE_TEMP,
+    DEFAULT_MAX_CONTINUOUS_HEAT_HOURS,
     DEFAULT_TEMP_AWAY,
     DEFAULT_TEMP_BOOST,
     DEFAULT_TEMP_COMFORT,
     DEFAULT_TEMP_ECO,
     DEFAULT_TEMP_HOLIDAY,
     DEFAULT_TEMP_SLEEP,
+    DEFAULT_VALVE_EXERCISE_ENABLED,
     DEFAULT_WINDOW_CLOSE_DELAY,
     DEFAULT_WINDOW_OPEN_DELAY,
     DOMAIN,
@@ -83,6 +90,9 @@ from .const import (
     PRESET_ECO,
     PRESET_HOLIDAY,
     PRESET_SLEEP,
+    RAPID_TEMP_DROP_THRESHOLD,
+    VALVE_EXERCISE_DURATION_MINUTES,
+    VALVE_EXERCISE_INTERVAL_DAYS,
 )
 from .coordinator import HAHeatingCoordinator
 
@@ -236,6 +246,25 @@ class HAHeatingRoomClimate(CoordinatorEntity[HAHeatingCoordinator], RestoreEntit
         self._last_commanded_ac_state: tuple[str, float | None] | None = None
         self._last_active_week: str | None = None
 
+        # Smart features state: Timed Boost, AC stratification offset, Valve Exercise, Anomaly detection
+        self._boost_duration_minutes: int = int(
+            self._config.get(CONF_BOOST_DURATION_MINUTES, DEFAULT_BOOST_DURATION_MINUTES)
+        )
+        self._boost_until: datetime | None = None
+        self._pre_boost_preset: str | None = None
+        self._ac_temp_offset: float = float(
+            self._config.get(CONF_AC_TEMP_OFFSET, DEFAULT_AC_TEMP_OFFSET)
+        )
+        self._valve_exercise_enabled: bool = bool(
+            self._config.get(CONF_VALVE_EXERCISE_ENABLED, DEFAULT_VALVE_EXERCISE_ENABLED)
+        )
+        self._last_trv_open_time: datetime = datetime.now()
+        self._valve_exercise_until: datetime | None = None
+        self._recent_temp_samples: list[tuple[datetime, float]] = []
+        self._rapid_drop_pause_until: datetime | None = None
+        self._heating_started_at: datetime | None = None
+        self._heating_start_temp: float | None = None
+
     async def async_added_to_hass(self) -> None:
         """Register listeners for external entities and restore previous state."""
         await super().async_added_to_hass()
@@ -274,6 +303,26 @@ class HAHeatingRoomClimate(CoordinatorEntity[HAHeatingCoordinator], RestoreEntit
                             self._manual_override_temp,
                             dt_until,
                         )
+                except Exception:
+                    pass
+
+            boost_until_str = last_state.attributes.get("boost_until")
+            pre_boost = last_state.attributes.get("pre_boost_preset")
+            if boost_until_str:
+                try:
+                    dt_boost = datetime.fromisoformat(boost_until_str)
+                    if datetime.now() < dt_boost and self._attr_preset_mode == PRESET_BOOST:
+                        self._boost_until = dt_boost
+                        self._pre_boost_preset = pre_boost
+                    elif self._attr_preset_mode == PRESET_BOOST and pre_boost in self._attr_preset_modes:
+                        self._attr_preset_mode = pre_boost
+                except Exception:
+                    pass
+
+            last_trv_str = last_state.attributes.get("last_trv_open_time")
+            if last_trv_str:
+                try:
+                    self._last_trv_open_time = datetime.fromisoformat(last_trv_str)
                 except Exception:
                     pass
 
@@ -393,10 +442,22 @@ class HAHeatingRoomClimate(CoordinatorEntity[HAHeatingCoordinator], RestoreEntit
         await self._async_evaluate()
 
     async def async_set_preset_mode(self, preset_mode: str) -> None:
-        """Set Preset mode."""
+        """Set Preset mode (with automatic countdown timer when Boost is selected)."""
         if preset_mode in self._attr_preset_modes:
+            if preset_mode == PRESET_BOOST:
+                if self._attr_preset_mode != PRESET_BOOST:
+                    self._pre_boost_preset = self._attr_preset_mode
+                if self._boost_duration_minutes > 0:
+                    self._boost_until = datetime.now() + timedelta(
+                        minutes=self._boost_duration_minutes
+                    )
+            else:
+                self._boost_until = None
+                self._pre_boost_preset = None
+
             self._attr_preset_mode = preset_mode
             self._manual_override_temp = None  # Clear manual override
+            self._manual_override_until = None
             await self._async_evaluate()
 
     async def _async_evaluate(self) -> None:
@@ -424,19 +485,70 @@ class HAHeatingRoomClimate(CoordinatorEntity[HAHeatingCoordinator], RestoreEntit
             self.async_write_ha_state()
             return
 
-        # 2. Check window pause
+        # 2. Check window pause & rapid temperature drop protection
         is_window_paused = self.coordinator.window_manager.get_is_room_paused(
             self._room_id
         )
 
-        # 3. Resolve target temperature & handle expired overrides / week cycle transitions
+        if self._attr_current_temperature is not None:
+            cutoff = now - timedelta(minutes=10)
+            self._recent_temp_samples = [
+                (ts, t) for ts, t in self._recent_temp_samples if ts >= cutoff
+            ]
+            self._recent_temp_samples.append((now, self._attr_current_temperature))
+            if (
+                not is_window_paused
+                and self._attr_hvac_mode != HVACMode.COOL
+                and (
+                    self._rapid_drop_pause_until is None
+                    or now >= self._rapid_drop_pause_until
+                )
+                and len(self._recent_temp_samples) >= 2
+            ):
+                max_temp = max(t for _, t in self._recent_temp_samples)
+                drop = round(max_temp - self._attr_current_temperature, 2)
+                if drop >= RAPID_TEMP_DROP_THRESHOLD:
+                    self._rapid_drop_pause_until = now + timedelta(minutes=15)
+                    self.hass.async_create_task(
+                        self.coordinator.async_send_anomaly_warning(
+                            self._room_id,
+                            self._attr_name or "Kamer",
+                            "rapid_drop",
+                            f"⚠️ HA Heating: Snelle temperatuurdaling ({self._attr_name})",
+                            f"Snelle temperatuurdaling gedetecteerd ({max_temp}°C -> {self._attr_current_temperature}°C binnen 10 min) "
+                            f"in '{self._attr_name}'. Verwarming is 15 minuten gepauzeerd (mogelijk open raam of defecte raamsensor).",
+                        )
+                    )
+
+        is_rapid_drop_paused = (
+            self._rapid_drop_pause_until is not None
+            and now < self._rapid_drop_pause_until
+        )
+        effective_paused = is_window_paused or is_rapid_drop_paused
+
+        # 3. Resolve target temperature & handle expired overrides / boost timer / week cycle transitions
         if self._manual_override_until is not None and now >= self._manual_override_until:
             self._manual_override_temp = None
             self._manual_override_until = None
 
+        if (
+            self._attr_preset_mode == PRESET_BOOST
+            and self._boost_until is not None
+            and now >= self._boost_until
+        ):
+            reverted_preset = (
+                self._pre_boost_preset
+                if self._pre_boost_preset in self._attr_preset_modes
+                else PRESET_ECO
+            )
+            self._attr_preset_mode = reverted_preset
+            self._boost_until = None
+            self._pre_boost_preset = None
+
         coord_data = self.coordinator.data or {}
         active_week = coord_data.get("active_week", "week_a")
         is_vacation = coord_data.get("is_vacation", False)
+        is_auto_away = coord_data.get("is_auto_away", False)
 
         sched_a_st = (
             self.hass.states.get(self._schedule_week_a).state
@@ -460,6 +572,16 @@ class HAHeatingRoomClimate(CoordinatorEntity[HAHeatingCoordinator], RestoreEntit
                 )
         self._last_active_week = active_week
 
+        # Check quiet hours early so solar buffer knows if AC is allowed
+        quiet_start = self._config.get(CONF_AC_QUIET_START, "22:00")
+        quiet_end = self._config.get(CONF_AC_QUIET_END, "07:00")
+        is_quiet = self.coordinator.arbitrage.is_in_quiet_hours(
+            now, quiet_start, quiet_end
+        )
+        is_sleep = self._attr_preset_mode == PRESET_SLEEP
+        if is_sleep:
+            is_quiet = True
+
         target_temp, reason = self.coordinator.scheduler.resolve_target_temperature(
             current_dt=now,
             preset_mode=self._attr_preset_mode,
@@ -470,7 +592,32 @@ class HAHeatingRoomClimate(CoordinatorEntity[HAHeatingCoordinator], RestoreEntit
             preset_temps=self._preset_temps,
             manual_override_temp=self._manual_override_temp,
             manual_override_until=self._manual_override_until,
+            is_auto_away=is_auto_away,
         )
+        if self._attr_preset_mode == PRESET_BOOST and self._boost_until is not None:
+            reason = f"{reason} (tot {self._boost_until.strftime('%H:%M')})"
+
+        # Apply Solar Surplus / Negative Price Thermal Buffer if AC is eligible
+        solar_buffer_applied = False
+        if (
+            coord_data.get("solar_buffer_active", False)
+            and self._ac_entity
+            and not is_quiet
+            and not is_vacation
+            and not is_auto_away
+            and self._manual_override_temp is None
+            and self._attr_preset_mode in (PRESET_COMFORT, PRESET_ECO)
+        ):
+            buf_offset = float(coord_data.get("solar_buffer_offset", 0.0))
+            if buf_offset > 0:
+                solar_buffer_applied = True
+                if self._attr_hvac_mode == HVACMode.COOL:
+                    target_temp = round(target_temp - buf_offset, 1)
+                    reason = f"{reason} (-{buf_offset:.1f}°C Zonne-buffer)"
+                else:
+                    target_temp = round(target_temp + buf_offset, 1)
+                    reason = f"{reason} (+{buf_offset:.1f}°C Zonne-buffer)"
+
         self._attr_target_temperature = target_temp
         self._reason = reason
 
@@ -480,7 +627,7 @@ class HAHeatingRoomClimate(CoordinatorEntity[HAHeatingCoordinator], RestoreEntit
         was_heating = self._attr_hvac_action == HVACAction.HEATING
         was_cooling = self._attr_hvac_action == HVACAction.COOLING
 
-        if self._attr_hvac_mode != HVACMode.OFF and not is_window_paused:
+        if self._attr_hvac_mode != HVACMode.OFF and not effective_paused:
             if self._attr_current_temperature is not None:
                 temp_deficit = round(
                     self._attr_target_temperature - self._attr_current_temperature, 2
@@ -508,6 +655,13 @@ class HAHeatingRoomClimate(CoordinatorEntity[HAHeatingCoordinator], RestoreEntit
             self._demand_reason = "Klimaat staat op UIT (geen verwarming)"
         elif is_window_paused:
             self._demand_reason = "Gepauzeerd: raam staat open"
+        elif is_rapid_drop_paused:
+            until_str = (
+                self._rapid_drop_pause_until.strftime("%H:%M")
+                if self._rapid_drop_pause_until
+                else ""
+            )
+            self._demand_reason = f"Gepauzeerd: snelle temperatuurdaling gedetecteerd (tot {until_str})"
         elif self._attr_current_temperature is None:
             self._demand_reason = "Geen actuele temperatuurmeting beschikbaar"
         elif needs_heat:
@@ -535,17 +689,8 @@ class HAHeatingRoomClimate(CoordinatorEntity[HAHeatingCoordinator], RestoreEntit
                 f"(doel {self._attr_target_temperature}°C, binnen hysterese)"
             )
 
-        # 5. Check quiet hours and AC availability
-        quiet_start = self._config.get(CONF_AC_QUIET_START, "22:00")
-        quiet_end = self._config.get(CONF_AC_QUIET_END, "07:00")
-        is_quiet = self.coordinator.arbitrage.is_in_quiet_hours(
-            now, quiet_start, quiet_end
-        )
-        is_sleep = (self._attr_preset_mode == PRESET_SLEEP)
-        if is_sleep:
-            is_quiet = True
-
-        global_should_use_ac = coord_data.get("should_use_ac", False)
+        # 5. Check AC availability & arbitrage
+        global_should_use_ac = coord_data.get("should_use_ac", False) or solar_buffer_applied
         global_arbitrage_reason = coord_data.get("arbitrage_reason", "")
 
         # 6. Arbitrage decision: AC vs Gas explanation
@@ -568,11 +713,14 @@ class HAHeatingRoomClimate(CoordinatorEntity[HAHeatingCoordinator], RestoreEntit
         use_ac_decision = needs_heat and ac_eligible
 
         # 7. Actuate hardware & update demand
-        if is_window_paused:
+        if effective_paused:
             self._active_heat_source = HEAT_SOURCE_PAUSED_WINDOW
             self._attr_hvac_action = HVACAction.OFF
             self._demand_active = False
-            self._action_summary = "Raam open gedetecteerd: TRV's gesloten (7.0°C vorstbeveiliging), airco uitgeschakeld"
+            if is_window_paused:
+                self._action_summary = "Raam open gedetecteerd: TRV's gesloten (7.0°C vorstbeveiliging), airco uitgeschakeld"
+            else:
+                self._action_summary = "Snelle temperatuurdaling gedetecteerd: TRV's gesloten (7.0°C), airco tijdelijk gepauzeerd"
             await self._set_trvs(DEFAULT_FROST_TEMP)
             await self._set_ac(HVACMode.OFF)
         elif self._attr_hvac_mode == HVACMode.OFF:
@@ -591,21 +739,30 @@ class HAHeatingRoomClimate(CoordinatorEntity[HAHeatingCoordinator], RestoreEntit
             await self._set_ac(HVACMode.COOL, self._attr_target_temperature)
         elif needs_heat:
             if use_ac_decision:
-                # Heat via AC
+                # Heat via AC (with ceiling stratification offset)
+                ac_setpoint = round(
+                    self._attr_target_temperature + self._ac_temp_offset, 1
+                )
+                offset_note = (
+                    f" (AC setpoint {ac_setpoint}°C incl. +{self._ac_temp_offset}°C plafond-offset)"
+                    if self._ac_temp_offset != 0
+                    else ""
+                )
                 self._active_heat_source = HEAT_SOURCE_AC_HEAT
                 self._attr_hvac_action = HVACAction.HEATING
                 self._demand_active = False
                 self._action_summary = (
-                    f"Verwarmen via Airco ({self._ac_entity}) naar {self._attr_target_temperature}°C. "
+                    f"Verwarmen via Airco ({self._ac_entity}) naar {self._attr_target_temperature}°C{offset_note}. "
                     f"TRV's blijven gesloten (7.0°C), Master ketel blijft uit."
                 )
                 await self._set_trvs(DEFAULT_FROST_TEMP)
-                await self._set_ac(HVACMode.HEAT, self._attr_target_temperature)
+                await self._set_ac(HVACMode.HEAT, ac_setpoint)
             else:
                 # Heat via Gas / Radiators
                 self._active_heat_source = HEAT_SOURCE_GAS
                 self._attr_hvac_action = HVACAction.HEATING
                 self._demand_active = True
+                self._last_trv_open_time = now
                 self._action_summary = (
                     f"Verwarmen via CV-ketel / radiatoren. TRV's geopend naar {self._attr_target_temperature}°C, "
                     f"Master thermostaat geactiveerd. [Reden geen airco: {self._ac_block_reason}]"
@@ -620,6 +777,64 @@ class HAHeatingRoomClimate(CoordinatorEntity[HAHeatingCoordinator], RestoreEntit
             self._action_summary = f"Rust: doeltemperatuur ({self._attr_target_temperature}°C) is bereikt"
             await self._set_trvs(self._attr_target_temperature)
             await self._set_ac(HVACMode.OFF)
+
+        # 7b. Weekly TRV Valve Exercise (Anti-calcification)
+        if self._valve_exercise_enabled and self._trvs and not effective_paused:
+            if (now - self._last_trv_open_time) >= timedelta(
+                days=VALVE_EXERCISE_INTERVAL_DAYS
+            ):
+                self._valve_exercise_until = now + timedelta(
+                    minutes=VALVE_EXERCISE_DURATION_MINUTES
+                )
+                self._last_trv_open_time = now
+
+        if (
+            self._valve_exercise_until is not None
+            and now < self._valve_exercise_until
+            and not self._demand_active
+            and not effective_paused
+        ):
+            await self._set_trvs(25.0)
+            self._action_summary = (
+                f"{self._action_summary} [Wekelijkse TRV-klepoefening actief tot "
+                f"{self._valve_exercise_until.strftime('%H:%M')} (ketel blijft uit)]"
+            )
+
+        # 7c. Continuous Heating Anomaly Check (Stuck heating / unmonitored open window)
+        if self._attr_hvac_action == HVACAction.HEATING:
+            if self._heating_started_at is None:
+                self._heating_started_at = now
+                self._heating_start_temp = self._attr_current_temperature
+            else:
+                elapsed_hours = (
+                    now - self._heating_started_at
+                ).total_seconds() / 3600.0
+                if elapsed_hours >= DEFAULT_MAX_CONTINUOUS_HEAT_HOURS:
+                    temp_gain = (
+                        self._attr_current_temperature - self._heating_start_temp
+                        if (
+                            self._attr_current_temperature is not None
+                            and self._heating_start_temp is not None
+                        )
+                        else 0.0
+                    )
+                    if temp_gain <= 0.2:
+                        self.hass.async_create_task(
+                            self.coordinator.async_send_anomaly_warning(
+                                self._room_id,
+                                self._attr_name or "Kamer",
+                                "continuous_heat",
+                                f"⚠️ HA Heating: Langdurig verwarmen ({self._attr_name})",
+                                f"Langdurig verwarmen zonder temperatuurstijging in '{self._attr_name}' "
+                                f"({elapsed_hours:.1f} uur onafgebroken actief, {self._heating_start_temp}°C -> {self._attr_current_temperature}°C). "
+                                f"Controleer of een raam openstaat of de verwarming geblokkeerd is.",
+                            )
+                        )
+                    self._heating_started_at = now
+                    self._heating_start_temp = self._attr_current_temperature
+        else:
+            self._heating_started_at = None
+            self._heating_start_temp = None
 
         # 8. Notify Master Thermostat controller
         if self._master_controller:
@@ -791,6 +1006,25 @@ class HAHeatingRoomClimate(CoordinatorEntity[HAHeatingCoordinator], RestoreEntit
                 if self._manual_override_until
                 else None
             ),
+            "boost_until": (
+                self._boost_until.isoformat() if self._boost_until else None
+            ),
+            "pre_boost_preset": self._pre_boost_preset,
+            "last_trv_open_time": (
+                self._last_trv_open_time.isoformat()
+                if self._last_trv_open_time
+                else None
+            ),
+            "valve_exercise_active": bool(
+                self._valve_exercise_until and now < self._valve_exercise_until
+            ),
+            "rapid_drop_paused": bool(
+                self._rapid_drop_pause_until and now < self._rapid_drop_pause_until
+            ),
+            "auto_away_active": coord_data.get("is_auto_away", False),
+            "solar_buffer_active": coord_data.get("solar_buffer_active", False),
+            "solar_buffer_reason": coord_data.get("solar_buffer_reason", ""),
+            "ac_temp_offset": self._ac_temp_offset,
         }
 
     async def async_will_remove_from_hass(self) -> None:

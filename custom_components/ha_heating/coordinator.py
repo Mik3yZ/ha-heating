@@ -15,6 +15,7 @@ from homeassistant.helpers.event import (
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .const import (
+    CONF_AUTO_AWAY_DELAY_MINUTES,
     CONF_CALENDAR_FILTER,
     CONF_CYCLE_ANCHOR_DATE,
     CONF_CYCLE_ENTITY,
@@ -25,15 +26,23 @@ from .const import (
     CONF_NOTIFY_SENSOR_OFFLINE,
     CONF_NOTIFY_SERVICE,
     CONF_OUTDOOR_TEMP_SENSOR,
+    CONF_PRESENCE_ENTITIES,
+    CONF_SOLAR_BUFFER_ENABLED,
+    CONF_SOLAR_BUFFER_OFFSET,
+    CONF_SOLAR_BUFFER_THRESHOLD_WATTS,
     CONF_SOLAR_EXPORT_SENSOR,
     CONF_SYSTEM_ENABLED,
     CONF_VACATION_CALENDAR,
     CYCLE_ISO_EVEN_ODD,
+    DEFAULT_AUTO_AWAY_DELAY_MINUTES,
     DEFAULT_MASTER_BOOST_OFFSET,
     DEFAULT_MASTER_IDLE_TEMP,
     DEFAULT_NOTIFY_PERSISTENT,
     DEFAULT_NOTIFY_SENSOR_OFFLINE,
     DEFAULT_NOTIFY_SERVICE,
+    DEFAULT_SOLAR_BUFFER_ENABLED,
+    DEFAULT_SOLAR_BUFFER_OFFSET,
+    DEFAULT_SOLAR_BUFFER_THRESHOLD_WATTS,
     DEFAULT_SYSTEM_ENABLED,
     DOMAIN,
 )
@@ -93,6 +102,8 @@ class HAHeatingCoordinator(DataUpdateCoordinator[dict]):
             self.hub_config.get(CONF_SYSTEM_ENABLED, DEFAULT_SYSTEM_ENABLED)
         )
         self._offline_sensors: set[str] = set()
+        self._notified_anomalies: set[str] = set()
+        self._last_all_away_since: datetime | None = None
 
         # Master controllers indexed by master entity_id
         self.master_controllers: dict[str, MasterThermostatController] = {}
@@ -207,6 +218,77 @@ class HAHeatingCoordinator(DataUpdateCoordinator[dict]):
                 except Exception as err:
                     _LOGGER.debug("Could not dismiss persistent notification: %s", err)
 
+    async def async_send_anomaly_warning(
+        self,
+        room_id: str,
+        room_name: str,
+        anomaly_key: str,
+        title: str,
+        message: str,
+    ) -> None:
+        """Send a warning notification for heating anomalies (e.g. rapid temperature drop or stuck valve)."""
+        notif_key = f"ha_heating_anomaly_{room_id}_{anomaly_key}"
+        if notif_key in self._notified_anomalies:
+            return
+        self._notified_anomalies.add(notif_key)
+
+        if self.hub_config.get(CONF_NOTIFY_PERSISTENT, DEFAULT_NOTIFY_PERSISTENT):
+            try:
+                await self.hass.services.async_call(
+                    "persistent_notification",
+                    "create",
+                    {
+                        "title": title,
+                        "message": message,
+                        "notification_id": notif_key,
+                    },
+                    blocking=False,
+                )
+            except Exception as err:
+                _LOGGER.debug("Could not create anomaly persistent notification: %s", err)
+
+        notify_svc = self.hub_config.get(CONF_NOTIFY_SERVICE, DEFAULT_NOTIFY_SERVICE)
+        if notify_svc:
+            domain, service = (
+                notify_svc.split(".", 1) if "." in notify_svc else ("notify", notify_svc)
+            )
+            try:
+                await self.hass.services.async_call(
+                    domain,
+                    service,
+                    {
+                        "title": title,
+                        "message": message,
+                        "data": {
+                            "tag": notif_key,
+                            "channel": "HA Heating Waarschuwingen",
+                            "importance": "high",
+                        },
+                    },
+                    blocking=False,
+                )
+            except Exception as err:
+                _LOGGER.debug("Could not send mobile anomaly notification: %s", err)
+
+    async def async_clear_anomaly_warning(
+        self, room_id: str, anomaly_key: str
+    ) -> None:
+        """Clear a previously triggered anomaly warning."""
+        notif_key = f"ha_heating_anomaly_{room_id}_{anomaly_key}"
+        if notif_key not in self._notified_anomalies:
+            return
+        self._notified_anomalies.discard(notif_key)
+        if self.hub_config.get(CONF_NOTIFY_PERSISTENT, DEFAULT_NOTIFY_PERSISTENT):
+            try:
+                await self.hass.services.async_call(
+                    "persistent_notification",
+                    "dismiss",
+                    {"notification_id": notif_key},
+                    blocking=False,
+                )
+            except Exception:
+                pass
+
     def get_or_create_master_controller(
         self,
         master_entity_id: str,
@@ -244,6 +326,13 @@ class HAHeatingCoordinator(DataUpdateCoordinator[dict]):
             ent = self.hub_config.get(key)
             if ent:
                 watched_entities.add(ent)
+
+        presence_ents = self.hub_config.get(CONF_PRESENCE_ENTITIES) or []
+        if isinstance(presence_ents, str):
+            presence_ents = [presence_ents]
+        for pent in presence_ents:
+            if pent:
+                watched_entities.add(pent)
 
         if watched_entities:
             @callback
@@ -291,6 +380,7 @@ class HAHeatingCoordinator(DataUpdateCoordinator[dict]):
             cal_attrs = st.attributes
 
         is_vacation = self.scheduler.is_vacation_active(cal_state, cal_attrs)
+        is_auto_away = self._evaluate_auto_away(now)
 
         cop = self.arbitrage.estimate_cop(outdoor_temp)
         thermal_gas = self.arbitrage.calculate_thermal_cost_gas(gas_price)
@@ -302,10 +392,32 @@ class HAHeatingCoordinator(DataUpdateCoordinator[dict]):
             gas_price, elec_price, outdoor_temp, solar_export
         )
 
+        solar_buf_enabled = bool(
+            self.hub_config.get(CONF_SOLAR_BUFFER_ENABLED, DEFAULT_SOLAR_BUFFER_ENABLED)
+        )
+        solar_buf_threshold = float(
+            self.hub_config.get(
+                CONF_SOLAR_BUFFER_THRESHOLD_WATTS, DEFAULT_SOLAR_BUFFER_THRESHOLD_WATTS
+            )
+        )
+        solar_buf_offset_cfg = float(
+            self.hub_config.get(CONF_SOLAR_BUFFER_OFFSET, DEFAULT_SOLAR_BUFFER_OFFSET)
+        )
+        solar_buffer_active, solar_buffer_offset, solar_buffer_reason = (
+            self.arbitrage.calculate_solar_buffer_offset(
+                solar_export_watts=solar_export,
+                electric_price_per_kwh=elec_price,
+                threshold_watts=solar_buf_threshold,
+                buffer_offset=solar_buf_offset_cfg,
+                enabled=solar_buf_enabled,
+            )
+        )
+
         return {
             "timestamp": now.isoformat(),
             "active_week": active_week,
             "is_vacation": is_vacation,
+            "is_auto_away": is_auto_away,
             "outdoor_temp": outdoor_temp,
             "gas_price": gas_price,
             "electric_price": elec_price,
@@ -315,7 +427,54 @@ class HAHeatingCoordinator(DataUpdateCoordinator[dict]):
             "thermal_cost_electric": thermal_elec,
             "should_use_ac": use_ac,
             "arbitrage_reason": reason,
+            "solar_buffer_active": solar_buffer_active,
+            "solar_buffer_offset": solar_buffer_offset,
+            "solar_buffer_reason": solar_buffer_reason,
         }
+
+    def _evaluate_auto_away(self, now: datetime) -> bool:
+        """Determine if Auto-Away should be active based on configured presence entities."""
+        presence_ents = self.hub_config.get(CONF_PRESENCE_ENTITIES) or []
+        if isinstance(presence_ents, str):
+            presence_ents = [presence_ents]
+        if not presence_ents:
+            self._last_all_away_since = None
+            return False
+
+        anyone_home = False
+        valid_states = 0
+        for ent_id in presence_ents:
+            if not ent_id:
+                continue
+            st = self.hass.states.get(ent_id)
+            if not st or not isinstance(st.state, str) or st.state in ("unknown", "unavailable"):
+                continue
+            valid_states += 1
+            s_val = st.state.lower().strip()
+            if s_val in ("home", "on", "true"):
+                anyone_home = True
+                break
+            try:
+                if float(s_val) > 0:
+                    anyone_home = True
+                    break
+            except (ValueError, TypeError):
+                pass
+
+        if valid_states == 0 or anyone_home:
+            self._last_all_away_since = None
+            return False
+
+        if self._last_all_away_since is None:
+            self._last_all_away_since = now
+
+        delay_min = float(
+            self.hub_config.get(
+                CONF_AUTO_AWAY_DELAY_MINUTES, DEFAULT_AUTO_AWAY_DELAY_MINUTES
+            )
+        )
+        elapsed_sec = (now - self._last_all_away_since).total_seconds()
+        return elapsed_sec >= (delay_min * 60.0)
 
     def _get_float_state(self, entity_id: str | None) -> float | None:
         """Safely extract float value from state entity."""

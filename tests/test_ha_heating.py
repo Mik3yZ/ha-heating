@@ -838,6 +838,282 @@ class TestClimateRestoreAndDiagnostics(unittest.IsolatedAsyncioTestCase):
         await coord.async_set_system_enabled(False)
         self.assertFalse(ctrl.is_heating_active)
 
+    async def test_timed_boost_auto_reverts_to_previous_preset(self):
+        from unittest.mock import AsyncMock
+        from custom_components.ha_heating.climate import HAHeatingRoomClimate
+        from custom_components.ha_heating.coordinator import HAHeatingCoordinator
+        from custom_components.ha_heating.const import (
+            CONF_BOOST_DURATION_MINUTES,
+            CONF_ROOM_NAME,
+            CONF_TRVS,
+            PRESET_BOOST,
+            PRESET_ECO,
+        )
+
+        hass_mock = MagicMock()
+        hass_mock.services.async_call = AsyncMock()
+        hass_mock.states.get.return_value = None
+
+        coord = HAHeatingCoordinator(hass_mock, {})
+        coord.data = {"active_week": "week_a", "should_use_ac": False}
+
+        entry_mock = MagicMock()
+        entry_mock.entry_id = "test_room_boost"
+        entry_mock.data = {
+            CONF_ROOM_NAME: "Badkamer",
+            CONF_TRVS: ["climate.trv_badkamer"],
+            CONF_BOOST_DURATION_MINUTES: 60,
+        }
+        entry_mock.options = {}
+
+        climate = HAHeatingRoomClimate(hass_mock, entry_mock, coord)
+        climate.async_get_last_state = AsyncMock(return_value=None)
+        await climate.async_added_to_hass()
+
+        await climate.async_set_preset_mode(PRESET_ECO)
+        self.assertEqual(climate._attr_preset_mode, PRESET_ECO)
+        self.assertEqual(climate._attr_target_temperature, 18.0)
+
+        await climate.async_set_preset_mode(PRESET_BOOST)
+        self.assertEqual(climate._attr_preset_mode, PRESET_BOOST)
+        self.assertEqual(climate._attr_target_temperature, 22.0)
+        self.assertEqual(climate._pre_boost_preset, PRESET_ECO)
+        self.assertIsNotNone(climate._boost_until)
+        self.assertIn("tot ", climate.extra_state_attributes["resolution_reason"])
+
+        # Simulate timer expiration
+        climate._boost_until = datetime.now() - timedelta(minutes=1)
+        await climate._async_evaluate()
+
+        self.assertEqual(climate._attr_preset_mode, PRESET_ECO)
+        self.assertEqual(climate._attr_target_temperature, 18.0)
+        self.assertIsNone(climate._boost_until)
+
+    async def test_auto_away_and_auto_resume(self):
+        from unittest.mock import AsyncMock
+        from custom_components.ha_heating.climate import HAHeatingRoomClimate
+        from custom_components.ha_heating.coordinator import HAHeatingCoordinator
+        from custom_components.ha_heating.const import (
+            CONF_AUTO_AWAY_DELAY_MINUTES,
+            CONF_PRESENCE_ENTITIES,
+            CONF_ROOM_NAME,
+            CONF_TRVS,
+            PRESET_COMFORT,
+        )
+
+        hass_mock = MagicMock()
+        hass_mock.services.async_call = AsyncMock()
+
+        person_state = MagicMock()
+        person_state.state = "not_home"
+        hass_mock.states.get.side_effect = (
+            lambda ent: person_state if ent == "person.mike" else None
+        )
+
+        coord = HAHeatingCoordinator(
+            hass_mock,
+            {
+                CONF_PRESENCE_ENTITIES: ["person.mike"],
+                CONF_AUTO_AWAY_DELAY_MINUTES: 15,
+            },
+        )
+        t0 = datetime.now()
+        # First check when nobody home starts the timer, not yet auto-away
+        self.assertFalse(coord._evaluate_auto_away(t0))
+
+        # Simulate 16 minutes elapsed since everyone left
+        coord._last_all_away_since = datetime.now() - timedelta(minutes=16)
+        coord.data = coord._evaluate_data()
+        self.assertTrue(coord.data["is_auto_away"])
+
+        entry_mock = MagicMock()
+        entry_mock.entry_id = "test_room_away"
+        entry_mock.data = {
+            CONF_ROOM_NAME: "Woonkamer",
+            CONF_TRVS: ["climate.trv_1"],
+        }
+        entry_mock.options = {}
+
+        climate = HAHeatingRoomClimate(hass_mock, entry_mock, coord)
+        climate.async_get_last_state = AsyncMock(return_value=None)
+        await climate.async_added_to_hass()
+
+        # Target temperature drops to Away (15.0°C) while preset_mode remains Comfort
+        self.assertEqual(climate._attr_preset_mode, PRESET_COMFORT)
+        self.assertEqual(climate._attr_target_temperature, 15.0)
+        self.assertIn("Auto-Away", climate.extra_state_attributes["resolution_reason"])
+
+        # Person comes home -> immediately resumes Comfort (20.5°C)
+        person_state.state = "home"
+        coord.data = coord._evaluate_data()
+        self.assertFalse(coord.data["is_auto_away"])
+        await climate._async_evaluate()
+        self.assertEqual(climate._attr_target_temperature, 20.5)
+
+    async def test_solar_surplus_buffer_and_ac_stratification_offset(self):
+        from unittest.mock import AsyncMock
+        from custom_components.ha_heating.climate import HAHeatingRoomClimate, HVACMode
+        from custom_components.ha_heating.coordinator import HAHeatingCoordinator
+        from custom_components.ha_heating.const import (
+            CONF_AC_ENTITY,
+            CONF_AC_QUIET_END,
+            CONF_AC_QUIET_START,
+            CONF_AC_TEMP_OFFSET,
+            CONF_ROOM_NAME,
+            CONF_ROOM_TEMP_SENSOR,
+            CONF_SOLAR_BUFFER_ENABLED,
+            CONF_SOLAR_BUFFER_OFFSET,
+            CONF_SOLAR_BUFFER_THRESHOLD_WATTS,
+            CONF_SOLAR_EXPORT_SENSOR,
+            CONF_TRVS,
+            HEAT_SOURCE_AC_HEAT,
+        )
+
+        hass_mock = MagicMock()
+        hass_mock.services.async_call = AsyncMock()
+
+        solar_state = MagicMock()
+        solar_state.state = "850"
+        temp_state = MagicMock()
+        temp_state.state = "20.8"  # Above normal 20.5°C, but below buffered 21.5°C (deficit 0.7 >= 0.5)
+
+        def get_state(ent):
+            if ent == "sensor.solar_export":
+                return solar_state
+            if ent == "sensor.room_temp":
+                return temp_state
+            return None
+
+        hass_mock.states.get.side_effect = get_state
+
+        coord = HAHeatingCoordinator(
+            hass_mock,
+            {
+                CONF_SOLAR_EXPORT_SENSOR: "sensor.solar_export",
+                CONF_SOLAR_BUFFER_ENABLED: True,
+                CONF_SOLAR_BUFFER_THRESHOLD_WATTS: 600.0,
+                CONF_SOLAR_BUFFER_OFFSET: 1.0,
+            },
+        )
+        coord.data = coord._evaluate_data()
+        self.assertTrue(coord.data["solar_buffer_active"])
+
+        entry_mock = MagicMock()
+        entry_mock.entry_id = "test_room_solar"
+        entry_mock.data = {
+            CONF_ROOM_NAME: "Woonkamer",
+            CONF_TRVS: ["climate.trv_1"],
+            CONF_AC_ENTITY: "climate.airco_woonkamer",
+            CONF_ROOM_TEMP_SENSOR: "sensor.room_temp",
+            CONF_AC_QUIET_START: "23:58",
+            CONF_AC_QUIET_END: "23:59",
+            CONF_AC_TEMP_OFFSET: 1.5,
+        }
+        entry_mock.options = {}
+
+        climate = HAHeatingRoomClimate(hass_mock, entry_mock, coord)
+        climate.async_get_last_state = AsyncMock(return_value=None)
+        await climate.async_added_to_hass()
+
+        # Target temp buffered from 20.5 to 21.5°C
+        self.assertEqual(climate._attr_target_temperature, 21.5)
+        self.assertEqual(climate._active_heat_source, HEAT_SOURCE_AC_HEAT)
+        # AC commanded to 21.5 + 1.5 = 23.0°C
+        self.assertEqual(climate._last_commanded_ac_state, (HVACMode.HEAT.value, 23.0))
+
+    async def test_weekly_trv_valve_exercise(self):
+        from unittest.mock import AsyncMock
+        from custom_components.ha_heating.climate import HAHeatingRoomClimate
+        from custom_components.ha_heating.coordinator import HAHeatingCoordinator
+        from custom_components.ha_heating.const import (
+            CONF_ROOM_NAME,
+            CONF_ROOM_TEMP_SENSOR,
+            CONF_TRVS,
+            CONF_VALVE_EXERCISE_ENABLED,
+        )
+
+        hass_mock = MagicMock()
+        hass_mock.services.async_call = AsyncMock()
+
+        temp_state = MagicMock()
+        temp_state.state = "21.0"  # Warm enough -> no heat demand
+        hass_mock.states.get.side_effect = (
+            lambda ent: temp_state if ent == "sensor.room_temp" else None
+        )
+
+        coord = HAHeatingCoordinator(hass_mock, {})
+        coord.data = {"active_week": "week_a", "should_use_ac": False}
+
+        entry_mock = MagicMock()
+        entry_mock.entry_id = "test_room_valve"
+        entry_mock.data = {
+            CONF_ROOM_NAME: "Logeerkamer",
+            CONF_TRVS: ["climate.trv_logeer"],
+            CONF_ROOM_TEMP_SENSOR: "sensor.room_temp",
+            CONF_VALVE_EXERCISE_ENABLED: True,
+        }
+        entry_mock.options = {}
+
+        climate = HAHeatingRoomClimate(hass_mock, entry_mock, coord)
+        climate.async_get_last_state = AsyncMock(return_value=None)
+        await climate.async_added_to_hass()
+
+        # Simulate TRV hasn't been opened for 8 days
+        climate._last_trv_open_time = datetime.now() - timedelta(days=8)
+        await climate._async_evaluate()
+
+        self.assertTrue(climate.extra_state_attributes["valve_exercise_active"])
+        self.assertFalse(climate._demand_active)  # Master boiler must stay OFF
+        self.assertEqual(climate._last_commanded_trv_temps["climate.trv_logeer"], 25.0)
+
+    async def test_rapid_temperature_drop_anomaly_pause(self):
+        from unittest.mock import AsyncMock
+        from custom_components.ha_heating.climate import HAHeatingRoomClimate, HVACAction
+        from custom_components.ha_heating.coordinator import HAHeatingCoordinator
+        from custom_components.ha_heating.const import (
+            CONF_ROOM_NAME,
+            CONF_ROOM_TEMP_SENSOR,
+            CONF_TRVS,
+            DEFAULT_FROST_TEMP,
+        )
+
+        hass_mock = MagicMock()
+        hass_mock.services.async_call = AsyncMock()
+        hass_mock.async_create_task = MagicMock(side_effect=lambda coro: coro.close())
+
+        temp_state = MagicMock()
+        temp_state.state = "20.5"
+        hass_mock.states.get.side_effect = (
+            lambda ent: temp_state if ent == "sensor.room_temp" else None
+        )
+
+        coord = HAHeatingCoordinator(hass_mock, {})
+        coord.data = {"active_week": "week_a", "should_use_ac": False}
+
+        entry_mock = MagicMock()
+        entry_mock.entry_id = "test_room_drop"
+        entry_mock.data = {
+            CONF_ROOM_NAME: "Slaapkamer",
+            CONF_TRVS: ["climate.trv_slaap"],
+            CONF_ROOM_TEMP_SENSOR: "sensor.room_temp",
+        }
+        entry_mock.options = {}
+
+        climate = HAHeatingRoomClimate(hass_mock, entry_mock, coord)
+        climate.async_get_last_state = AsyncMock(return_value=None)
+        await climate.async_added_to_hass()
+
+        # Sudden drop of 2.0°C (20.5 -> 18.5°C) without window sensor open
+        temp_state.state = "18.5"
+        await climate._async_evaluate()
+
+        self.assertTrue(climate.extra_state_attributes["rapid_drop_paused"])
+        self.assertEqual(climate._attr_hvac_action, HVACAction.OFF)
+        self.assertFalse(climate._demand_active)
+        self.assertEqual(
+            climate._last_commanded_trv_temps["climate.trv_slaap"], DEFAULT_FROST_TEMP
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -21,11 +21,20 @@ CONF_NOTIFY_SENSOR_OFFLINE = "notify_sensor_offline"
 CONF_NOTIFY_SERVICE = "notify_service"
 CONF_NOTIFY_PERSISTENT = "notify_persistent"
 CONF_SYSTEM_ENABLED = "system_enabled"
+CONF_PRESENCE_ENTITIES = "presence_entities"
+CONF_AUTO_AWAY_DELAY_MINUTES = "auto_away_delay_minutes"
+CONF_SOLAR_BUFFER_ENABLED = "solar_buffer_enabled"
+CONF_SOLAR_BUFFER_THRESHOLD_WATTS = "solar_buffer_threshold_watts"
+CONF_SOLAR_BUFFER_OFFSET = "solar_buffer_offset"
 
 DEFAULT_NOTIFY_SENSOR_OFFLINE = True
 DEFAULT_NOTIFY_SERVICE = "notify.notify"
 DEFAULT_NOTIFY_PERSISTENT = True
 DEFAULT_SYSTEM_ENABLED = True
+DEFAULT_AUTO_AWAY_DELAY_MINUTES = 15
+DEFAULT_SOLAR_BUFFER_ENABLED = True
+DEFAULT_SOLAR_BUFFER_THRESHOLD_WATTS = 600.0
+DEFAULT_SOLAR_BUFFER_OFFSET = 1.0
 
 # Room configuration keys
 CONF_AREA_ID = "area_id"
@@ -44,6 +53,9 @@ CONF_AC_ENTITY = "ac_entity"
 CONF_AC_QUIET_START = "ac_quiet_start"
 CONF_AC_QUIET_END = "ac_quiet_end"
 CONF_AC_ENABLE_COOLING = "ac_enable_cooling"
+CONF_AC_TEMP_OFFSET = "ac_temp_offset"
+CONF_BOOST_DURATION_MINUTES = "boost_duration_minutes"
+CONF_VALVE_EXERCISE_ENABLED = "valve_exercise_enabled"
 CONF_SCHEDULE_WEEK_A = "schedule_week_a"
 CONF_SCHEDULE_WEEK_B = "schedule_week_b"
 
@@ -88,6 +100,13 @@ DEFAULT_MIN_OFF_DURATION = 180  # 3 min anti-cycling
 
 DEFAULT_GAS_KWH_PER_M3 = 9.0  # Caloric value * efficiency
 DEFAULT_AC_COOL_DEADBAND = 1.0  # °C
+DEFAULT_AC_TEMP_OFFSET = 1.5  # °C ceiling stratification compensation
+DEFAULT_BOOST_DURATION_MINUTES = 60  # minutes before Boost auto-reverts
+DEFAULT_VALVE_EXERCISE_ENABLED = True
+VALVE_EXERCISE_INTERVAL_DAYS = 7
+VALVE_EXERCISE_DURATION_MINUTES = 3
+DEFAULT_MAX_CONTINUOUS_HEAT_HOURS = 4.0
+RAPID_TEMP_DROP_THRESHOLD = 1.5  # °C drop within 10 minutes triggers anomaly pause
 
 DEFAULT_TEMP_COMFORT = 20.5
 DEFAULT_TEMP_ECO = 18.0

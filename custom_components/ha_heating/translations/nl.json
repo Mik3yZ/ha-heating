@@ -24,7 +24,12 @@
           "cycle_entity": "Sensor of Helper voor weekstatus (optioneel)",
           "notify_sensor_offline": "Melding sturen als een raamsensor offline of niet beschikbaar is",
           "notify_persistent": "Melding tonen in Home Assistant (Notificatiepaneel)",
-          "notify_service": "Mobiele meldingsservice (bijv. notify.notify of notify.mobile_app_telefoon)"
+          "notify_service": "Mobiele meldingsservice (bijv. notify.notify of notify.mobile_app_telefoon)",
+          "presence_entities": "Aanwezigheidssensoren voor Auto-Away (bijv. person.* of zone.home)",
+          "auto_away_delay_minutes": "Auto-Away vertraging wanneer niemand thuis is (minuten)",
+          "solar_buffer_enabled": "Zonne-overschot & negatieve stroomprijs thermische buffer inschakelen",
+          "solar_buffer_threshold_watts": "Zonne-overschot drempelwaarde voor voorverwarmen/koelen (Watt)",
+          "solar_buffer_offset": "Extra temperatuur-buffer bij gratis energie (+°C)"
         }
       },
       "room": {
@@ -46,6 +51,7 @@
           "ac_quiet_start": "Airco stille tijd start (bijv. 22:00)",
           "ac_quiet_end": "Airco stille tijd eind (bijv. 07:00)",
           "ac_enable_cooling": "Automatisch koelen toestaan",
+          "ac_temp_offset": "Airco plafond-compensatie offset bij verwarmen (+°C)",
           "schedule_week_a": "HA Schedule helper: Week A (optioneel)",
           "schedule_week_b": "HA Schedule helper: Week B (optioneel)",
           "temp_comfort": "Comfort temperatuur (°C)",
@@ -53,7 +59,9 @@
           "temp_sleep": "Slaap/Nacht temperatuur (°C)",
           "temp_away": "Afwezigheid temperatuur (°C)",
           "temp_boost": "Boost temperatuur (°C)",
-          "temp_holiday": "Vakantie temperatuur (°C)"
+          "boost_duration_minutes": "Boost duur voor automatische terugkeer (minuten)",
+          "temp_holiday": "Vakantie temperatuur (°C)",
+          "valve_exercise_enabled": "Wekelijkse anti-kalk TRV-klepoefening inschakelen"
         }
       }
     },
@@ -84,6 +92,11 @@
           "notify_sensor_offline": "Melding sturen als een raamsensor offline of niet beschikbaar is",
           "notify_persistent": "Melding tonen in Home Assistant (Notificatiepaneel)",
           "notify_service": "Mobiele meldingsservice (bijv. notify.notify of notify.mobile_app_telefoon)",
+          "presence_entities": "Aanwezigheidssensoren voor Auto-Away (bijv. person.* of zone.home)",
+          "auto_away_delay_minutes": "Auto-Away vertraging wanneer niemand thuis is (minuten)",
+          "solar_buffer_enabled": "Zonne-overschot & negatieve stroomprijs thermische buffer inschakelen",
+          "solar_buffer_threshold_watts": "Zonne-overschot drempelwaarde voor voorverwarmen/koelen (Watt)",
+          "solar_buffer_offset": "Extra temperatuur-buffer bij gratis energie (+°C)",
           "area_id": "Kamer (Home Assistant Ruimte)",
           "room_name": "Aangepaste weergavenaam (optioneel)",
           "room_temp_sensor": "Kamertemperatuursensor (optioneel, anders gemiddelde van TRVs)",
@@ -99,6 +112,7 @@
           "ac_quiet_start": "Airco stille tijd start (bijv. 22:00)",
           "ac_quiet_end": "Airco stille tijd eind (bijv. 07:00)",
           "ac_enable_cooling": "Automatisch koelen toestaan",
+          "ac_temp_offset": "Airco plafond-compensatie offset bij verwarmen (+°C)",
           "schedule_week_a": "HA Schedule helper: Week A (optioneel)",
           "schedule_week_b": "HA Schedule helper: Week B (optioneel)",
           "temp_comfort": "Comfort temperatuur (°C)",
@@ -106,7 +120,9 @@
           "temp_sleep": "Slaap/Nacht temperatuur (°C)",
           "temp_away": "Afwezigheid temperatuur (°C)",
           "temp_boost": "Boost temperatuur (°C)",
-          "temp_holiday": "Vakantie temperatuur (°C)"
+          "boost_duration_minutes": "Boost duur voor automatische terugkeer (minuten)",
+          "temp_holiday": "Vakantie temperatuur (°C)",
+          "valve_exercise_enabled": "Wekelijkse anti-kalk TRV-klepoefening inschakelen"
         }
       }
     }

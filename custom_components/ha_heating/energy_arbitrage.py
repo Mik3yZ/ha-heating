@@ -136,6 +136,37 @@ class EnergyArbitrage:
         )
 
     @staticmethod
+    def calculate_solar_buffer_offset(
+        solar_export_watts: float | None,
+        electric_price_per_kwh: float | None,
+        threshold_watts: float = 600.0,
+        buffer_offset: float = 1.0,
+        enabled: bool = True,
+    ) -> tuple[bool, float, str]:
+        """Evaluate whether thermal solar/negative-price buffering should be active.
+
+        Returns (active: bool, offset_celsius: float, reason: str).
+        """
+        if not enabled or buffer_offset <= 0:
+            return False, 0.0, "Zonne-buffer uitgeschakeld"
+
+        if solar_export_watts is not None and solar_export_watts >= threshold_watts:
+            return (
+                True,
+                float(buffer_offset),
+                f"Zonne-overschot buffer actief ({solar_export_watts:.0f}W >= {threshold_watts:.0f}W): +{buffer_offset:.1f}°C",
+            )
+
+        if electric_price_per_kwh is not None and electric_price_per_kwh < 0.0:
+            return (
+                True,
+                float(buffer_offset),
+                f"Negatieve stroomprijs buffer actief (€{electric_price_per_kwh:.3f}/kWh): +{buffer_offset:.1f}°C",
+            )
+
+        return False, 0.0, "Geen zonne-buffer actief"
+
+    @staticmethod
     def is_in_quiet_hours(
         current_dt: datetime,
         quiet_start_str: str | None,

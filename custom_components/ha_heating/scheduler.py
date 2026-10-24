@@ -102,6 +102,7 @@ class HeatingScheduler:
         preset_temps: dict[str, float],
         manual_override_temp: float | None = None,
         manual_override_until: datetime | None = None,
+        is_auto_away: bool = False,
     ) -> tuple[float, str]:
         """Resolve the current target temperature and active reason.
 
@@ -124,6 +125,11 @@ class HeatingScheduler:
             return preset_temps.get(PRESET_BOOST, 22.0), "Preset: Boost"
         if preset_mode == PRESET_AWAY:
             return preset_temps.get(PRESET_AWAY, 15.0), "Preset: Away"
+
+        # 3b. Auto-Away presence detection (nobody home -> temporary Away setpoint)
+        if is_auto_away:
+            return preset_temps.get(PRESET_AWAY, 15.0), "Auto-Away (niemand thuis)"
+
         if preset_mode == PRESET_SLEEP:
             return preset_temps.get(PRESET_SLEEP, 16.0), "Preset: Sleep"
 
